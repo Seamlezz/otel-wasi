@@ -24,7 +24,7 @@ func New(
 
 // +check
 func (m *OtelWasi) Build(ctx context.Context) error {
-	_, err := m.rust().WithExec([]string{"cargo", "build", "--locked"}).Sync(ctx)
+	_, err := m.rust().WithExec([]string{"cargo", "build"}).Sync(ctx)
 	return err
 }
 

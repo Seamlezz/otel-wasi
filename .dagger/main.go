@@ -106,6 +106,7 @@ func (m *OtelWasi) rust() *dagger.Container {
 	return dag.Container().
 		From("rust:latest").
 		WithEnvVariable("CARGO_HOME", "/cargo").
+		WithEnvVariable("CARGO_NET_GIT_FETCH_WITH_CLI", "true").
 		WithMountedCache("/cargo/registry", dag.CacheVolume("cargo-registry")).
 		WithMountedCache("/cargo/git", dag.CacheVolume("cargo-git")).
 		WithMountedDirectory("/src", m.Source).
@@ -118,12 +119,13 @@ func (m *OtelWasi) wash() *dagger.Container {
 
 	return dag.Container().
 		From("ghcr.io/wasmcloud/wash:2.3.0").
-		WithExec([]string{"apk", "add", "--no-cache", "build-base"}).
+		WithExec([]string{"apk", "add", "--no-cache", "build-base", "git"}).
 		WithDirectory("/usr/local/cargo", rust.Directory("/usr/local/cargo")).
 		WithDirectory("/usr/local/rustup", rust.Directory("/usr/local/rustup")).
 		WithEnvVariable("PATH", "/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin").
 		WithEnvVariable("CARGO_HOME", "/cargo").
 		WithEnvVariable("RUSTUP_HOME", "/usr/local/rustup").
+		WithEnvVariable("CARGO_NET_GIT_FETCH_WITH_CLI", "true").
 		WithMountedCache("/cargo/registry", dag.CacheVolume("cargo-registry")).
 		WithMountedCache("/cargo/git", dag.CacheVolume("cargo-git")).
 		WithMountedDirectory("/src", m.Source).

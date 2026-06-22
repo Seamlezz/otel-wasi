@@ -1,0 +1,8 @@
+{
+  "name": "otel-wasi",
+  "engineVersion": "v0.21.7",
+  "sdk": {
+    "source": "go"
+  },
+  "source": ".dagger"
+}

@@ -1,0 +1,13 @@
+[workspace]
+members = ["otel-wasi", "otel-wasi-macros", "examples/wasmcloud-nats-echo"]
+default-members = ["otel-wasi", "otel-wasi-macros"]
+resolver = "3"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+
+[profile.release]
+opt-level = "s"
+strip = true
+lto = true

@@ -1,0 +1,5 @@
+error: unsupported wasi_instrument option `nope`
+ --> tests/ui/fail/invalid_option.rs:3:45
+  |
+3 | #[wasi_instrument(service = "test-service", nope = "nope")]
+  |                                             ^^^^

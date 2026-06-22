@@ -1,0 +1,5 @@
+error: #[wasi_instrument] requires `service = "..."`
+ --> tests/ui/fail/missing_service.rs:4:4
+  |
+4 | fn missing_service() {}
+  |    ^^^^^^^^^^^^^^^

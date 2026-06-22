@@ -83,13 +83,6 @@ fn expand_wasi_instrument(
     args: InstrumentArgs,
     input: ItemFn,
 ) -> syn::Result<proc_macro2::TokenStream> {
-    if input.sig.asyncness.is_some() {
-        return Err(syn::Error::new_spanned(
-            input.sig.asyncness,
-            "#[wasi_instrument] does not support async functions yet",
-        ));
-    }
-
     let service = args.service.ok_or_else(|| {
         syn::Error::new_spanned(
             &input.sig.ident,
@@ -122,7 +115,40 @@ fn expand_wasi_instrument(
     let block = &input.block;
     let outer_attrs = &input.attrs;
 
-    let finish = match &sig.output {
+    let finish = if sig.asyncness.is_some() {
+        expand_async_finish(&sig.output, block, &record_attrs)
+    } else {
+        expand_sync_finish(&sig.output, block, &record_attrs)
+    };
+
+    Ok(quote! {
+        #(#outer_attrs)*
+        #vis #sig {
+            let __otel_wasi_span = {
+                let __otel_wasi_config = ::otel_wasi::SpanConfig::builder()
+                    .service_name(#service)
+                    .span_name(#span_name)
+                    .error_slug(#error_slug)
+                    .build();
+                let __otel_wasi_tracing_span = ::otel_wasi::span!(
+                    ::tracing::Level::INFO,
+                    #span_name,
+                    main = true,
+                );
+                ::otel_wasi::WasiSpan::from_span(__otel_wasi_tracing_span, __otel_wasi_config)
+            };
+
+            #finish
+        }
+    })
+}
+
+fn expand_sync_finish(
+    output: &ReturnType,
+    block: &syn::Block,
+    record_attrs: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    match output {
         ReturnType::Default => quote! {
             let __otel_wasi_result = (|| {
                 let __otel_wasi_guard = __otel_wasi_span.enter();
@@ -150,28 +176,43 @@ fn expand_wasi_instrument(
             __otel_wasi_span.finish_ok();
             __otel_wasi_result
         },
-    };
+    }
+}
 
-    Ok(quote! {
-        #(#outer_attrs)*
-        #vis #sig {
-            let __otel_wasi_span = {
-                let __otel_wasi_config = ::otel_wasi::SpanConfig::builder()
-                    .service_name(#service)
-                    .span_name(#span_name)
-                    .error_slug(#error_slug)
-                    .build();
-                let __otel_wasi_tracing_span = ::otel_wasi::span!(
-                    ::tracing::Level::INFO,
-                    #span_name,
-                    main = true,
-                );
-                ::otel_wasi::WasiSpan::from_span(__otel_wasi_tracing_span, __otel_wasi_config)
-            };
-
-            #finish
-        }
-    })
+fn expand_async_finish(
+    output: &ReturnType,
+    block: &syn::Block,
+    record_attrs: &proc_macro2::TokenStream,
+) -> proc_macro2::TokenStream {
+    match output {
+        ReturnType::Default => quote! {
+            let __otel_wasi_poll_span = __otel_wasi_span.span().clone();
+            let __otel_wasi_result = ::tracing::Instrument::instrument(async {
+                #record_attrs
+                #block
+            }, __otel_wasi_poll_span).await;
+            __otel_wasi_span.finish(&__otel_wasi_result);
+            __otel_wasi_result
+        },
+        ReturnType::Type(_, ty) if is_result_type(ty) => quote! {
+            let __otel_wasi_poll_span = __otel_wasi_span.span().clone();
+            let __otel_wasi_result = ::tracing::Instrument::instrument(async {
+                #record_attrs
+                #block
+            }, __otel_wasi_poll_span).await;
+            __otel_wasi_span.finish(&__otel_wasi_result);
+            __otel_wasi_result
+        },
+        ReturnType::Type(_, _) => quote! {
+            let __otel_wasi_poll_span = __otel_wasi_span.span().clone();
+            let __otel_wasi_result = ::tracing::Instrument::instrument(async {
+                #record_attrs
+                #block
+            }, __otel_wasi_poll_span).await;
+            __otel_wasi_span.finish_ok();
+            __otel_wasi_result
+        },
+    }
 }
 
 fn is_result_type(ty: &Type) -> bool {

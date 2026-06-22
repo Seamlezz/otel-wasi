@@ -13,7 +13,7 @@ fn handle_message(msg: BrokerMessage) -> Result<(), String> {
 }
 ```
 
-The macro sets up tracing, creates the main WASI span, enters it, records duration, records success/error status, and preserves parent trace context.
+The macro sets up tracing, creates the main WASI span, enters it, records duration, records success/error status, and preserves parent trace context. Native `async fn` entry points are supported; async-trait/manual future-returning wrappers are not currently special-cased.
 
 ## Intended crate layout
 
@@ -98,7 +98,7 @@ The planned default behavior is:
   - `Ok(_)`: mark span OK.
   - `Err(e)`: mark span error, record `error = true`, `exception.slug`, and `exception.message`.
 
-The macro internally wraps the function body so `?` returns are still recorded before returning to the caller.
+The macro internally wraps the function body so `?` returns are still recorded before returning to the caller. For native `async fn`, the generated code instruments the inner future with `tracing::Instrument` rather than holding a span-enter guard across `.await` points.
 
 ## Manual API
 

@@ -2,7 +2,6 @@
 name = "otel-wasi-wasmcloud-nats-echo-example"
 version.workspace = true
 edition.workspace = true
-publish = false
 
 [lib]
 crate-type = ["cdylib"]

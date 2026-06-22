@@ -2,10 +2,6 @@
 name = "otel-wasi-macros"
 version.workspace = true
 edition.workspace = true
-description = "Proc-macro for #[wasi_instrument] attribute to instrument WASI functions with OpenTelemetry spans"
-license = "AGPL-3.0"
-publish = ["crates-io"]
-
 [lib]
 proc-macro = true
 

@@ -2,8 +2,6 @@
 name = "otel-wasi"
 version.workspace = true
 edition.workspace = true
-publish = ["crates-io"]
-
 [features]
 default = ["macros"]
 macros = ["dep:otel-wasi-macros"]

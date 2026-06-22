@@ -5,13 +5,14 @@ use opentelemetry::{
 use opentelemetry_sdk::{Resource, trace::SdkTracerProvider};
 use opentelemetry_wasi::{TraceContextPropagator, WasiPropagator, WasiSpanProcessor};
 use std::{fmt::Display, sync::OnceLock, time::Instant};
-use tracing::{Level, Span};
+use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{Registry, layer::SubscriberExt};
 
 pub use opentelemetry::KeyValue as Attribute;
 #[cfg(feature = "macros")]
 pub use otel_wasi_macros::wasi_instrument;
+pub use tracing::span;
 
 const SPAN_DROPPED_SLUG: &str = "otel-wasi-span-dropped-without-finish";
 
@@ -69,8 +70,10 @@ impl SpanConfigBuilder {
         let service_name = self.service_name.expect(
             "SpanConfig requires service_name; use SpanConfig::builder().service_name(...)",
         );
-        let span_name = self.span_name.unwrap_or("wasi-span");
-        let error_slug = self.error_slug.unwrap_or("wasi-span-failed");
+        let span_name = self
+            .span_name
+            .expect("SpanConfig requires span_name; use SpanConfig::builder().span_name(...)");
+        let error_slug = self.error_slug.unwrap_or("otel-wasi-error");
 
         SpanConfig {
             service_name,
@@ -110,16 +113,15 @@ pub struct WasiSpan {
 }
 
 impl WasiSpan {
-    pub fn start(config: SpanConfig) -> Self {
+    /// Create a WasiSpan from an already-constructed tracing Span.
+    ///
+    /// The tracing span's name becomes the OTel span name directly.
+    /// Prefer this over [`start`] when the span name is available as
+    /// a string literal (e.g. from the `#[wasi_instrument]` macro).
+    pub fn from_span(span: Span, config: SpanConfig) -> Self {
         ensure_init(config.service_name);
 
         let parent_cx = TraceContextPropagator::new().extract(&opentelemetry::Context::current());
-        let span = tracing::span!(
-            Level::INFO,
-            "wasi_span",
-            main = true,
-            span_name = config.span_name,
-        );
         let _ = span.set_parent(parent_cx);
 
         span.set_attribute(
@@ -128,7 +130,6 @@ impl WasiSpan {
         );
         span.set_attribute("service.name", config.service_name);
         span.set_attribute("service.version", env!("CARGO_PKG_VERSION"));
-        span.set_attribute("otel_wasi.span.name", config.span_name);
 
         if let Some(git_hash) = option_env!("GIT_HASH") {
             span.set_attribute("service.build.git_hash", git_hash);

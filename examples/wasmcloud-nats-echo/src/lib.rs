@@ -22,12 +22,12 @@ struct Component;
 impl bindings::exports::wasmcloud::messaging::handler::Guest for Component {
     #[otel_wasi::wasi_instrument(
         service = "otel-wasi-nats-echo-example",
-        name = "handle-message",
-        error_slug = "nats-handler-failed",
+        name = "handle-message", // Optional
+        error_slug = "nats-handler-failed", // Optional
         attributes(
             "messaging.system" = "nats",
             "component.kind" = "wasmcloud-messaging-handler"
-        )
+        ) // Optional
     )]
     fn handle_message(msg: BrokerMessage) -> Result<(), String> {
         // Dynamic attributes for the current root span.

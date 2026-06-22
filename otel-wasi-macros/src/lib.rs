@@ -155,13 +155,19 @@ fn expand_wasi_instrument(
     Ok(quote! {
         #(#outer_attrs)*
         #vis #sig {
-            let __otel_wasi_span = ::otel_wasi::WasiSpan::start(
-                ::otel_wasi::SpanConfig::builder()
+            let __otel_wasi_span = {
+                let __otel_wasi_config = ::otel_wasi::SpanConfig::builder()
                     .service_name(#service)
                     .span_name(#span_name)
                     .error_slug(#error_slug)
-                    .build(),
-            );
+                    .build();
+                let __otel_wasi_tracing_span = ::otel_wasi::span!(
+                    ::tracing::Level::INFO,
+                    #span_name,
+                    main = true,
+                );
+                ::otel_wasi::WasiSpan::from_span(__otel_wasi_tracing_span, __otel_wasi_config)
+            };
 
             #finish
         }

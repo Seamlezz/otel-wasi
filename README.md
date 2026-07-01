@@ -50,21 +50,26 @@ fn handle_message(msg: BrokerMessage) -> Result<(), String> {
 }
 ```
 
-Child functions should generally use normal `tracing` instrumentation:
+Child functions should generally use normal `tracing` instrumentation. Use `attribute!` for child-span details, and use `main_attribute!` for fields that should roll up to the entrypoint span:
 
 ```rust
 #[tracing::instrument(name = "publish-reply", level = "info", skip(msg))]
 fn publish_reply(msg: &BrokerMessage) -> Result<(), String> {
+    // Local child-span detail for waterfall/debugging.
     otel_wasi::attribute!(
-        "messaging.system" = "nats",
         "messaging.message.body.size" = msg.body.len() as i64,
+    );
+
+    // Incident-query rollup on the entrypoint span.
+    otel_wasi::main_attribute!(
+        "messaging.reply.publish_attempted" = true,
     );
 
     Ok(())
 }
 ```
 
-Because the main span is entered by `#[wasi_instrument]`, child `#[tracing::instrument]` spans become children automatically.
+Because the main span is entered by `#[wasi_instrument]`, child `#[tracing::instrument]` spans become children automatically. `#[wasi_instrument]` also stores the entrypoint span as the active otel-wasi main span while the function body is executing. For async entrypoints, this main-span context is scoped to each future poll.
 
 ## Attributes
 
@@ -77,7 +82,18 @@ otel_wasi::attribute!(
 );
 ```
 
-For manual flows, the macro also supports an explicit span target:
+Use `main_attribute!` from helpers or child spans to set one or more attributes on the active `#[wasi_instrument]` entrypoint span:
+
+```rust
+otel_wasi::main_attribute!(
+    "messaging.reply.publish_attempted" = true,
+    "messaging.reply.body.size" = body.len() as i64,
+);
+```
+
+If `main_attribute!` is called outside an active `#[wasi_instrument]` invocation, it triggers a debug assertion in debug builds and is a no-op in release builds.
+
+For manual flows, `attribute!` also supports an explicit span target:
 
 ```rust
 otel_wasi::attribute!(
@@ -86,7 +102,7 @@ otel_wasi::attribute!(
 );
 ```
 
-Static root-span attributes can be placed directly on `#[wasi_instrument(...)]` using `attributes(...)`. Dynamic values should be set inside the function body with `attribute!`.
+Static entrypoint-span attributes can be placed directly on `#[wasi_instrument(...)]` using `attributes(...)`. Dynamic values should be set inside the function body with `attribute!` or `main_attribute!`, depending on the target span.
 
 ## Outcome behavior
 
@@ -114,6 +130,7 @@ let span = otel_wasi::WasiSpan::start(
 );
 
 let result = {
+    let _main_guard = otel_wasi::enter_main_span(span.span().clone());
     let _guard = span.enter();
     publish_reply(&msg)
 };

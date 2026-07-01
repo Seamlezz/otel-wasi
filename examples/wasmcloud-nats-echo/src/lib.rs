@@ -48,18 +48,24 @@ impl bindings::exports::wasmcloud::messaging::handler::Guest for Component {
 #[tracing::instrument(name = "publish-reply", level = "info", skip(msg))]
 fn publish_reply(msg: &BrokerMessage) -> Result<(), String> {
     // Because this function is instrumented with normal `tracing`, this writes
-    // to the child `publish-reply` span rather than the root `handle-message` span.
-    otel_wasi::attribute!(
-        "messaging.system" = "nats",
+    // local debugging detail to the child `publish-reply` span.
+    otel_wasi::attribute!("messaging.message.body.size" = msg.body.len() as i64,);
+
+    // Roll up incident-query context to the entrypoint span without passing the
+    // span through every helper.
+    otel_wasi::main_attribute!(
+        "messaging.reply.publish_attempted" = true,
         "messaging.message.body.size" = msg.body.len() as i64,
     );
 
     let Some(reply_to) = msg.reply_to.clone() else {
+        otel_wasi::main_attribute!("messaging.reply.skipped" = true);
         Span::current().set_status(Status::Ok);
         return Ok(());
     };
 
     otel_wasi::attribute!("messaging.destination.name" = reply_to.clone());
+    otel_wasi::main_attribute!("messaging.reply.destination.name" = reply_to.clone());
 
     let result = consumer::publish(&BrokerMessage {
         subject: reply_to,

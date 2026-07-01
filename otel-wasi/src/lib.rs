@@ -4,7 +4,15 @@ use opentelemetry::{
 };
 use opentelemetry_sdk::{Resource, trace::SdkTracerProvider};
 use opentelemetry_wasi::{TraceContextPropagator, WasiPropagator, WasiSpanProcessor};
-use std::{fmt::Display, sync::OnceLock, time::Instant};
+use std::{
+    cell::RefCell,
+    fmt::Display,
+    future::Future,
+    pin::Pin,
+    sync::OnceLock,
+    task::{Context, Poll},
+    time::Instant,
+};
 use tracing::Span;
 use tracing_opentelemetry::OpenTelemetrySpanExt;
 use tracing_subscriber::{Registry, layer::SubscriberExt};
@@ -17,6 +25,10 @@ pub use tracing::span;
 const SPAN_DROPPED_SLUG: &str = "otel-wasi-span-dropped-without-finish";
 
 static TRACE_INIT: OnceLock<()> = OnceLock::new();
+
+thread_local! {
+    static MAIN_SPAN_STACK: RefCell<Vec<Span>> = const { RefCell::new(Vec::new()) };
+}
 
 #[derive(Debug, Clone)]
 pub struct SpanConfig {
@@ -212,9 +224,71 @@ impl Drop for WasiSpan {
     }
 }
 
+pub struct MainSpanGuard {
+    _private: (),
+}
+
+pub fn enter_main_span(span: Span) -> MainSpanGuard {
+    MAIN_SPAN_STACK.with(|stack| stack.borrow_mut().push(span));
+    MainSpanGuard { _private: () }
+}
+
+impl Drop for MainSpanGuard {
+    fn drop(&mut self) {
+        MAIN_SPAN_STACK.with(|stack| {
+            stack.borrow_mut().pop();
+        });
+    }
+}
+
+pub fn current_main_span() -> Option<Span> {
+    MAIN_SPAN_STACK.with(|stack| stack.borrow().last().cloned())
+}
+
 pub fn set_current_attributes(attrs: impl IntoIterator<Item = KeyValue>) {
     let span = Span::current();
     set_span_attributes(&span, attrs);
+}
+
+pub fn set_main_attributes(attrs: impl IntoIterator<Item = KeyValue>) {
+    let Some(span) = current_main_span() else {
+        debug_assert!(
+            false,
+            "otel_wasi::main_attribute! called outside #[wasi_instrument] main span"
+        );
+        return;
+    };
+
+    set_span_attributes(&span, attrs);
+}
+
+pub struct WithMainSpan<F> {
+    main_span: Span,
+    future: Pin<Box<F>>,
+}
+
+pub fn with_main_span<F>(main_span: Span, future: F) -> WithMainSpan<F>
+where
+    F: Future,
+{
+    WithMainSpan {
+        main_span,
+        future: Box::pin(future),
+    }
+}
+
+impl<F> Future for WithMainSpan<F>
+where
+    F: Future,
+{
+    type Output = F::Output;
+
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let guard = enter_main_span(self.main_span.clone());
+        let poll = self.future.as_mut().poll(cx);
+        drop(guard);
+        poll
+    }
 }
 
 pub fn set_span_attributes(span: &Span, attrs: impl IntoIterator<Item = KeyValue>) {
@@ -239,6 +313,15 @@ macro_rules! attribute {
     }};
 }
 
+#[macro_export]
+macro_rules! main_attribute {
+    ($($key:literal = $value:expr),+ $(,)?) => {{
+        $crate::set_main_attributes([
+            $($crate::Attribute::new($key, $value)),+
+        ]);
+    }};
+}
+
 fn ensure_init(service_name: &'static str) {
     TRACE_INIT.get_or_init(|| {
         let provider = SdkTracerProvider::builder()
@@ -252,4 +335,36 @@ fn ensure_init(service_name: &'static str) {
         let _ = tracing::subscriber::set_global_default(subscriber);
         opentelemetry::global::set_tracer_provider(provider);
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn main_span_context_is_scoped() {
+        assert!(current_main_span().is_none());
+
+        let first = Span::none();
+        let first_guard = enter_main_span(first);
+        assert!(current_main_span().is_some());
+
+        {
+            let second = Span::none();
+            let _second_guard = enter_main_span(second);
+            assert!(current_main_span().is_some());
+        }
+
+        assert!(current_main_span().is_some());
+        drop(first_guard);
+        assert!(current_main_span().is_none());
+    }
+
+    #[test]
+    fn set_main_attributes_uses_registered_span() {
+        let span = Span::none();
+        let _guard = enter_main_span(span);
+
+        set_main_attributes([KeyValue::new("test.value", 1_i64)]);
+    }
 }

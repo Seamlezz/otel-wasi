@@ -11,11 +11,12 @@ type OtelWasi struct {
 }
 
 func New(
-	// +optional
-	// +defaultPath="/"
-	source *dagger.Directory,
+	source *dagger.Workspace,
 ) *OtelWasi {
-	return &OtelWasi{Source: source}
+	return &OtelWasi{Source: source.Directory("/", dagger.WorkspaceDirectoryOpts{
+		Exclude:   []string{".git"},
+		Gitignore: true,
+	})}
 }
 
 // +check

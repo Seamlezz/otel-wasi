@@ -9,7 +9,7 @@ name = "otel_wasi_wasmcloud_nats_echo_example"
 
 [dependencies]
 otel-wasi = { path = "../../otel-wasi" }
-opentelemetry = "0.31.0"
-tracing = "0.1"
-tracing-opentelemetry = "0.32"
-wit-bindgen = "0.57"
+opentelemetry = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+wit-bindgen = { workspace = true }

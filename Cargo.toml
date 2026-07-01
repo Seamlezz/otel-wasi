@@ -7,6 +7,21 @@ resolver = "3"
 version = "0.2.0"
 edition = "2024"
 
+[workspace.dependencies]
+opentelemetry = "0.31"
+opentelemetry_sdk = { version = "0.31" }
+opentelemetry-wasi = { package = "opentelemetry-wasi", git = "https://github.com/bytecodealliance/opentelemetry-wasi", rev = "2962a286aa66188314bcafd79c800c4e39ce41e1" }
+tracing = "0.1"
+tracing-opentelemetry = "0.32"
+tracing-subscriber = "0.3"
+
+wit-bindgen = "0.58"
+
+proc-macro2 = "1"
+quote = "1"
+syn = { version = "2", features = ["full"] }
+
+
 [profile.release]
 opt-level = "s"
 strip = true

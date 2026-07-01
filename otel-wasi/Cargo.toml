@@ -7,12 +7,12 @@ default = ["macros"]
 macros = ["dep:otel-wasi-macros"]
 
 [dependencies]
-opentelemetry = "0.31.0"
-opentelemetry_sdk = { version = "0.31.0" }
-opentelemetry-wasi = { package = "opentelemetry-wasi", git = "https://github.com/bytecodealliance/opentelemetry-wasi", rev = "2962a286aa66188314bcafd79c800c4e39ce41e1" }
-tracing = "0.1"
-tracing-opentelemetry = "0.32"
-tracing-subscriber = "0.3"
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-wasi = { workspace = true }
+tracing = { workspace = true }
+tracing-opentelemetry = { workspace = true }
+tracing-subscriber = { workspace = true }
 otel-wasi-macros = { path = "../otel-wasi-macros", optional = true }
 
 [dev-dependencies]

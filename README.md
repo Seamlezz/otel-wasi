@@ -23,19 +23,19 @@ This repository is a workspace:
 otel-wasi/
   otel-wasi/          # runtime library
   otel-wasi-macros/   # proc macro crate
+  otel-wasi-dylint/   # dylint lint crate
 ```
 
 The runtime crate owns the real behavior. The macro crate should stay thin and only generate calls into the runtime API.
 
 ## Main span instrumentation
 
-`#[wasi_instrument]` is intended for WASI/component entry points — the main/root span for one invocation.
+`#[wasi_instrument]` is intended for WASI/component entry points: the main/root span for one invocation.
 
 ```rust
 #[otel_wasi::wasi_instrument(
     service = "nats-echo",
     name = "handle-message",
-    error_slug = "nats-publish-failed",
     attributes(
         "messaging.system" = "nats"
     )
@@ -70,6 +70,24 @@ fn publish_reply(msg: &BrokerMessage) -> Result<(), String> {
 ```
 
 Because the main span is entered by `#[wasi_instrument]`, child `#[tracing::instrument]` spans become children automatically. `#[wasi_instrument]` also stores the entrypoint span as the active otel-wasi main span while the function body is executing. For async entrypoints, this main-span context is scoped to each future poll.
+
+### WASI component exports
+
+When the instrumented function is a WASI component export, the return type must be `Result<T, String>` (WIT `result<T, string>`). Use the `export` option to automatically convert `WasiError` types to `String` at the boundary:
+
+```rust
+#[otel_wasi::wasi_instrument(
+    service = "nats-echo",
+    export
+)]
+fn handle_message(msg: BrokerMessage) -> Result<(), String> {
+    // Inside the function body, you can use WasiError types normally.
+    // The macro wraps the body and converts Err(e) to Err(e.message().to_string()).
+    publish_reply(&msg)
+}
+```
+
+Without `export`, the function's return type is used as-is. With `export`, the macro rewrites the signature to `Result<T, String>` and converts `WasiError` values to their `message()` string at the return boundary.
 
 ## Attributes
 
@@ -106,7 +124,7 @@ Static entrypoint-span attributes can be placed directly on `#[wasi_instrument(.
 
 ## Outcome behavior
 
-The planned default behavior is:
+The default behavior is:
 
 - `()` return: mark span OK.
 - Plain value return: mark span OK.
@@ -116,18 +134,50 @@ The planned default behavior is:
 
 The macro internally wraps the function body so `?` returns are still recorded before returning to the caller. For native `async fn`, the generated code instruments the inner future with `tracing::Instrument` rather than holding a span-enter guard across `.await` points.
 
+## Error types and slugging
+
+The `WasiError` trait provides structured error reporting for OTel spans:
+
+```rust
+pub trait WasiError {
+    fn slug(&self) -> &'static str;   // e.g. "db-timeout"
+    fn message(&self) -> &str;         // human-readable detail
+}
+```
+
+A convenience `Error` type implements `WasiError` and can be created with the `wasi_error!` macro:
+
+```rust
+use otel_wasi::wasi_error;
+
+let err = wasi_error!("db-timeout", "connection to {} timed out after {}ms", host, ms);
+```
+
+Two extension traits make it easy to attach slugs to existing error types:
+
+```rust
+use otel_wasi::{WithSlug, ResultWithSlug};
+
+// Attach a slug to any Display type:
+let err = io_error.with_slug("file-read-failed");
+
+// Attach a slug to the error arm of a Result:
+let result: Result<(), _> = fallible_op().error_with_slug("fallible-op-failed");
+```
+
+The `SpanOutcome` trait controls how return values are recorded on a `WasiSpan`. It is implemented for `()` and for `Result<T, E: WasiError>`. Custom implementations are possible for non-standard return types.
+
 ## Manual API
 
 The macro is the preferred API, but the runtime should remain usable manually:
 
 ```rust
-let span = otel_wasi::WasiSpan::start(
-    otel_wasi::SpanConfig::builder()
-        .service_name("nats-echo")
-        .span_name("handle-message")
-        .error_slug("nats-publish-failed")
-        .build(),
-);
+let tracing_span = otel_wasi::span!(tracing::Level::INFO, "handle-message");
+let config = otel_wasi::SpanConfig::builder()
+    .service_name("nats-echo")
+    .span_name("handle-message")
+    .build();
+let span = otel_wasi::WasiSpan::from_span(tracing_span, config);
 
 let result = {
     let _main_guard = otel_wasi::enter_main_span(span.span().clone());
@@ -137,6 +187,14 @@ let result = {
 
 span.finish(&result);
 result
+```
+
+For non-Result return types, use `finish_ok()` or `finish_error(slug, message)`:
+
+```rust
+span.finish_ok();
+// or:
+span.finish_error("publish-failed", "no subscribers for subject");
 ```
 
 This keeps the proc macro replaceable and the runtime maintainable long-term.
@@ -175,25 +233,107 @@ cargo binstall cargo-dylint dylint-link
 cargo install cargo-dylint dylint-link
 ```
 
-**Add the lint library to your workspace config** — in `dylint.toml` or `Cargo.toml`:
+**Add the lint library to your workspace config** in `dylint.toml` or `Cargo.toml`:
 
 ```toml
 [workspace.metadata.dylint]
 libraries = [
-    { git = "https://github.com/.../otel-wasi", pattern = "otel-wasi-dylint" }
+    { git = "https://github.com/Seamlezz/otel-wasi", pattern = "otel-wasi-dylint" }
 ]
 ```
 
-**Configure your IDE** — override rust-analyzer's check command so dylint diagnostics appear inline:
+**Configure your IDE**: override rust-analyzer's check command so dylint diagnostics appear inline. All editors use the same underlying `rust-analyzer.check.overrideCommand` setting; only the config format differs.
 
-| Editor | Configuration |
-|--------|--------------|
-| **VS Code** | `settings.json`: `"rust-analyzer.check.overrideCommand": ["cargo", "dylint", "--all", "--", "--all-targets", "--message-format=json"]` |
-| **Zed** | `settings.json`: `"lsp": { "rust-analyzer": { "initialization_options": { "check": { "overrideCommand": ["cargo", "dylint", "--all", "--", "--all-targets", "--message-format=json"] } } } }` |
-| **Neovim** (rustaceanvim) | `require('rustaceanvim').setup({ server = { settings = { ['rust-analyzer'] = { check = { overrideCommand = { 'cargo', 'dylint', '--all', '--', '--all-targets', '--message-format=json' } } } } } })` |
-| **Neovim** (lspconfig) | `require('lspconfig').rust_analyzer.setup({ settings = { ['rust-analyzer'] = { check = { overrideCommand = { 'cargo', 'dylint', '--all', '--', '--all-targets', '--message-format=json' } } } } })` |
-| **Helix** | `languages.toml`: `[[language]] name = "rust" language-server = { command = "rust-analyzer" } [language.config] check.overrideCommand = ["cargo", "dylint", "--all", "--", "--all-targets", "--message-format=json"]` |
+<details>
+<summary>VS Code</summary>
 
-All editors use the same underlying `rust-analyzer.check.overrideCommand` setting — only the config format differs.
+In `settings.json`:
+
+```json
+"rust-analyzer.check.overrideCommand": [
+    "cargo", "dylint", "--all", "--", "--all-targets", "--message-format=json"
+]
+```
+
+</details>
+
+<details>
+<summary>Zed</summary>
+
+In `settings.json`:
+
+```json
+"lsp": {
+    "rust-analyzer": {
+        "initialization_options": {
+            "check": {
+                "overrideCommand": [
+                    "cargo", "dylint", "--all", "--", "--all-targets", "--message-format=json"
+                ]
+            }
+        }
+    }
+}
+```
+
+</details>
+
+<details>
+<summary>Neovim (rustaceanvim)</summary>
+
+```lua
+require('rustaceanvim').setup({
+    server = {
+        settings = {
+            ['rust-analyzer'] = {
+                check = {
+                    overrideCommand = {
+                        'cargo', 'dylint', '--all', '--', '--all-targets', '--message-format=json'
+                    }
+                }
+            }
+        }
+    }
+})
+```
+
+</details>
+
+<details>
+<summary>Neovim (lspconfig)</summary>
+
+```lua
+require('lspconfig').rust_analyzer.setup({
+    settings = {
+        ['rust-analyzer'] = {
+            check = {
+                overrideCommand = {
+                    'cargo', 'dylint', '--all', '--', '--all-targets', '--message-format=json'
+                }
+            }
+        }
+    }
+})
+```
+
+</details>
+
+<details>
+<summary>Helix</summary>
+
+In `languages.toml`:
+
+```toml
+[[language]]
+name = "rust"
+language-server = { command = "rust-analyzer" }
+
+[language.config]
+check.overrideCommand = [
+    "cargo", "dylint", "--all", "--", "--all-targets", "--message-format=json"
+]
+```
+
+</details>
 
 [dylint]: https://github.com/trailofbits/dylint

@@ -11,9 +11,7 @@ mod bindings {
 }
 
 use bindings::wasmcloud::messaging::{consumer, types::BrokerMessage};
-use opentelemetry::trace::Status;
-use tracing::Span;
-use tracing_opentelemetry::OpenTelemetrySpanExt;
+use otel_wasi::ResultWithSlug;
 
 const PUBLISH_FAILED_SLUG: &str = "nats-publish-failed";
 
@@ -22,14 +20,14 @@ struct Component;
 impl bindings::exports::wasmcloud::messaging::handler::Guest for Component {
     #[otel_wasi::wasi_instrument(
         service = "otel-wasi-nats-echo-example",
-        name = "handle-message", // Optional
-        error_slug = "nats-handler-failed", // Optional
+        name = "handle-message",
+        export,
         attributes(
             "messaging.system" = "nats",
             "component.kind" = "wasmcloud-messaging-handler"
-        ) // Optional
+        )
     )]
-    fn handle_message(msg: BrokerMessage) -> Result<(), String> {
+    fn handle_message(msg: BrokerMessage) -> Result<(), otel_wasi::Error> {
         // Dynamic attributes for the current root span.
         otel_wasi::attribute!(
             "messaging.destination.name" = msg.subject.clone(),
@@ -46,7 +44,7 @@ impl bindings::exports::wasmcloud::messaging::handler::Guest for Component {
 }
 
 #[tracing::instrument(name = "publish-reply", level = "info", skip(msg))]
-fn publish_reply(msg: &BrokerMessage) -> Result<(), String> {
+fn publish_reply(msg: &BrokerMessage) -> Result<(), otel_wasi::Error> {
     // Because this function is instrumented with normal `tracing`, this writes
     // local debugging detail to the child `publish-reply` span.
     otel_wasi::attribute!("messaging.message.body.size" = msg.body.len() as i64,);
@@ -60,7 +58,6 @@ fn publish_reply(msg: &BrokerMessage) -> Result<(), String> {
 
     let Some(reply_to) = msg.reply_to.clone() else {
         otel_wasi::main_attribute!("messaging.reply.skipped" = true);
-        Span::current().set_status(Status::Ok);
         return Ok(());
     };
 
@@ -73,19 +70,8 @@ fn publish_reply(msg: &BrokerMessage) -> Result<(), String> {
         reply_to: None,
     });
 
-    match &result {
-        Ok(()) => Span::current().set_status(Status::Ok),
-        Err(e) => record_current_error(PUBLISH_FAILED_SLUG, e),
-    }
-
-    result
-}
-
-fn record_current_error(slug: &'static str, message: &str) {
-    otel_wasi::attribute!(
-        "error" = true,
-        "exception.slug" = slug,
-        "exception.message" = message.to_string(),
-    );
-    Span::current().set_status(Status::error(message.to_string()));
+    // Attach a slug to the error — the #[wasi_instrument(export)] macro
+    // on handle_message will record the slug+message on the span and
+    // convert back to String for the WIT contract.
+    result.error_with_slug(PUBLISH_FAILED_SLUG)
 }

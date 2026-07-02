@@ -6,7 +6,7 @@ use opentelemetry_sdk::{Resource, trace::SdkTracerProvider};
 use opentelemetry_wasi::{TraceContextPropagator, WasiPropagator, WasiSpanProcessor};
 use std::{
     cell::RefCell,
-    fmt::Display,
+    fmt::{self, Display},
     future::Future,
     pin::Pin,
     sync::OnceLock,
@@ -34,7 +34,6 @@ thread_local! {
 pub struct SpanConfig {
     service_name: &'static str,
     span_name: &'static str,
-    error_slug: &'static str,
 }
 
 impl SpanConfig {
@@ -49,17 +48,12 @@ impl SpanConfig {
     pub fn span_name(&self) -> &'static str {
         self.span_name
     }
-
-    pub fn error_slug(&self) -> &'static str {
-        self.error_slug
-    }
 }
 
 #[derive(Debug, Default, Clone)]
 pub struct SpanConfigBuilder {
     service_name: Option<&'static str>,
     span_name: Option<&'static str>,
-    error_slug: Option<&'static str>,
 }
 
 impl SpanConfigBuilder {
@@ -73,11 +67,6 @@ impl SpanConfigBuilder {
         self
     }
 
-    pub fn error_slug(mut self, error_slug: &'static str) -> Self {
-        self.error_slug = Some(error_slug);
-        self
-    }
-
     pub fn build(self) -> SpanConfig {
         let service_name = self.service_name.expect(
             "SpanConfig requires service_name; use SpanConfig::builder().service_name(...)",
@@ -85,13 +74,80 @@ impl SpanConfigBuilder {
         let span_name = self
             .span_name
             .expect("SpanConfig requires span_name; use SpanConfig::builder().span_name(...)");
-        let error_slug = self.error_slug.unwrap_or("otel-wasi-error");
 
         SpanConfig {
             service_name,
             span_name,
-            error_slug,
         }
+    }
+}
+
+/// An error that carries its own slug for OTel span recording.
+pub trait WasiError {
+    /// A stable slug identifying this error class (e.g. "auth-callout-timeout").
+    fn slug(&self) -> &'static str;
+
+    /// A human-readable message for the span's `exception.message` attribute.
+    fn message(&self) -> &str;
+}
+
+/// A convenience error type implementing [`WasiError`].
+#[derive(Debug, Clone)]
+pub struct Error {
+    slug: &'static str,
+    message: String,
+}
+
+impl Error {
+    pub fn new(slug: &'static str, message: impl Display) -> Self {
+        Self {
+            slug,
+            message: message.to_string(),
+        }
+    }
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.message)
+    }
+}
+
+impl WasiError for Error {
+    fn slug(&self) -> &'static str {
+        self.slug
+    }
+
+    fn message(&self) -> &str {
+        &self.message
+    }
+}
+
+/// Creates an [`Error`] with a slug and a [`format!`]-style message.
+#[macro_export]
+macro_rules! wasi_error {
+    ($slug:literal, $($arg:tt)*) => {
+        $crate::Error::new($slug, format!($($arg)*))
+    };
+}
+
+/// Extension trait to attach a slug to any [`Display`] type.
+pub trait WithSlug: Display + Sized {
+    fn with_slug(self, slug: &'static str) -> Error {
+        Error::new(slug, self)
+    }
+}
+
+impl<T: Display + Sized> WithSlug for T {}
+
+/// Extension trait to attach a slug to the error of a [`Result`].
+pub trait ResultWithSlug<T, E: Display> {
+    fn error_with_slug(self, slug: &'static str) -> Result<T, Error>;
+}
+
+impl<T, E: Display> ResultWithSlug<T, E> for Result<T, E> {
+    fn error_with_slug(self, slug: &'static str) -> Result<T, Error> {
+        self.map_err(|e| e.with_slug(slug))
     }
 }
 
@@ -105,14 +161,11 @@ impl SpanOutcome for () {
     }
 }
 
-impl<T, E> SpanOutcome for Result<T, E>
-where
-    E: Display,
-{
+impl<T, E: WasiError> SpanOutcome for Result<T, E> {
     fn record_on(&self, span: &WasiSpan) {
         match self {
             Ok(_) => span.set_status_ok(),
-            Err(e) => span.set_status_error(span.error_slug, e),
+            Err(e) => span.set_status_error(e.slug(), e.message()),
         }
     }
 }
@@ -121,7 +174,6 @@ pub struct WasiSpan {
     span: Span,
     started_at: Instant,
     finished: bool,
-    error_slug: &'static str,
 }
 
 impl WasiSpan {
@@ -151,7 +203,6 @@ impl WasiSpan {
             span,
             started_at: Instant::now(),
             finished: false,
-            error_slug: config.error_slug,
         }
     }
 
@@ -185,10 +236,10 @@ impl WasiSpan {
         self.set_status_ok();
     }
 
-    pub fn finish_error(mut self, message: impl Display) {
+    pub fn finish_error(mut self, slug: &'static str, message: impl Display) {
         self.finished = true;
         self.record_duration();
-        self.set_status_error(self.error_slug, message);
+        self.set_status_error(slug, message);
     }
 
     fn record_duration(&self) {

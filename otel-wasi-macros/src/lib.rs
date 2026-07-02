@@ -2,13 +2,13 @@ use proc_macro::TokenStream;
 use quote::quote;
 use syn::{
     Expr, Ident, ItemFn, LitStr, ReturnType, Token, Type, parenthesized, parse::Parse,
-    parse::ParseStream, parse_macro_input,
+    parse::ParseStream, parse_macro_input, parse_quote,
 };
 
 struct InstrumentArgs {
     service: Option<LitStr>,
     name: Option<LitStr>,
-    error_slug: Option<LitStr>,
+    export: bool,
     attributes: Vec<(LitStr, Expr)>,
 }
 
@@ -17,7 +17,7 @@ impl Parse for InstrumentArgs {
         let mut args = Self {
             service: None,
             name: None,
-            error_slug: None,
+            export: false,
             attributes: Vec::new(),
         };
 
@@ -32,9 +32,8 @@ impl Parse for InstrumentArgs {
                     input.parse::<Token![=]>()?;
                     args.name = Some(input.parse()?);
                 }
-                "error_slug" => {
-                    input.parse::<Token![=]>()?;
-                    args.error_slug = Some(input.parse()?);
+                "export" => {
+                    args.export = true;
                 }
                 "attributes" => {
                     let content;
@@ -81,7 +80,7 @@ pub fn wasi_instrument(args: TokenStream, item: TokenStream) -> TokenStream {
 
 fn expand_wasi_instrument(
     args: InstrumentArgs,
-    input: ItemFn,
+    mut input: ItemFn,
 ) -> syn::Result<proc_macro2::TokenStream> {
     let service = args.service.ok_or_else(|| {
         syn::Error::new_spanned(
@@ -94,10 +93,6 @@ fn expand_wasi_instrument(
     let span_name = args
         .name
         .unwrap_or_else(|| LitStr::new(&fn_name, input.sig.ident.span()));
-    let default_error_slug = format!("{}-failed", span_name.value());
-    let error_slug = args
-        .error_slug
-        .unwrap_or_else(|| LitStr::new(&default_error_slug, span_name.span()));
 
     let attrs = args.attributes.iter().map(|(key, value)| {
         quote! { #key = #value }
@@ -110,15 +105,43 @@ fn expand_wasi_instrument(
         }
     };
 
+    // Handle export mode: rewrite Result<T, WasiError> → Result<T, String>
+    let original_ret_ty = if args.export {
+        let ret_ty: Type = match &input.sig.output {
+            ReturnType::Type(_, ty) => (**ty).clone(),
+            ReturnType::Default => {
+                return Err(syn::Error::new_spanned(
+                    &input.sig.ident,
+                    "#[wasi_instrument(export)] requires a `Result<T, E>` return type",
+                ));
+            }
+        };
+
+        let ok_ty = extract_result_ok_type(&ret_ty).ok_or_else(|| {
+            syn::Error::new_spanned(
+                &ret_ty,
+                "#[wasi_instrument(export)] requires a `Result<T, E>` return type",
+            )
+        })?;
+
+        // Rewrite the function signature to return Result<T, String>
+        let new_ret_ty: Type = parse_quote! { Result<#ok_ty, String> };
+        input.sig.output = ReturnType::Type(Token![->](input.sig.ident.span()), Box::new(new_ret_ty));
+
+        Some(ret_ty)
+    } else {
+        None
+    };
+
     let vis = &input.vis;
     let sig = &input.sig;
     let block = &input.block;
     let outer_attrs = &input.attrs;
 
     let finish = if sig.asyncness.is_some() {
-        expand_async_finish(&sig.output, block, &record_attrs)
+        expand_async_finish(&input.sig.output, block, &record_attrs, original_ret_ty)
     } else {
-        expand_sync_finish(&sig.output, block, &record_attrs)
+        expand_sync_finish(&input.sig.output, block, &record_attrs, original_ret_ty)
     };
 
     Ok(quote! {
@@ -128,7 +151,6 @@ fn expand_wasi_instrument(
                 let __otel_wasi_config = ::otel_wasi::SpanConfig::builder()
                     .service_name(#service)
                     .span_name(#span_name)
-                    .error_slug(#error_slug)
                     .build();
                 let __otel_wasi_tracing_span = ::otel_wasi::span!(
                     ::tracing::Level::INFO,
@@ -142,34 +164,58 @@ fn expand_wasi_instrument(
     })
 }
 
+/// Extract `T` from `Result<T, E>`.
+fn extract_result_ok_type(ty: &Type) -> Option<&Type> {
+    match ty {
+        Type::Path(type_path) => {
+            let segment = type_path.path.segments.last()?;
+            if segment.ident != "Result" {
+                return None;
+            }
+            match &segment.arguments {
+                syn::PathArguments::AngleBracketed(args) => match args.args.first()? {
+                    syn::GenericArgument::Type(ty) => Some(ty),
+                    _ => None,
+                },
+                _ => None,
+            }
+        }
+        _ => None,
+    }
+}
+
 fn expand_sync_finish(
     output: &ReturnType,
     block: &syn::Block,
     record_attrs: &proc_macro2::TokenStream,
+    export_original_ty: Option<Type>,
 ) -> proc_macro2::TokenStream {
-    match output {
-        ReturnType::Default => quote! {
-            let __otel_wasi_result = (|| {
-                let __otel_wasi_main_guard = ::otel_wasi::enter_main_span(__otel_wasi_span.span().clone());
-                let __otel_wasi_guard = __otel_wasi_span.enter();
-                #record_attrs
-                #block
-            })();
-            __otel_wasi_span.finish(&__otel_wasi_result);
-            __otel_wasi_result
-        },
-        ReturnType::Type(_, ty) if is_result_type(ty) => quote! {
-            let __otel_wasi_result = (|| -> #ty {
-                let __otel_wasi_main_guard = ::otel_wasi::enter_main_span(__otel_wasi_span.span().clone());
-                let __otel_wasi_guard = __otel_wasi_span.enter();
-                #record_attrs
-                #block
-            })();
-            __otel_wasi_span.finish(&__otel_wasi_result);
-            __otel_wasi_result
-        },
-        ReturnType::Type(_, ty) => quote! {
-            let __otel_wasi_result = (|| -> #ty {
+    // In export mode, the inner closure uses the original WasiError type
+    // and we convert to String at the boundary.
+    let inner_ty: &Type = match &export_original_ty {
+        Some(ty) => ty,
+        None => match output {
+            ReturnType::Type(_, ty) => ty,
+            ReturnType::Default => {
+                return quote! {
+                    let __otel_wasi_result = (|| {
+                        let __otel_wasi_main_guard = ::otel_wasi::enter_main_span(__otel_wasi_span.span().clone());
+                        let __otel_wasi_guard = __otel_wasi_span.enter();
+                        #record_attrs
+                        #block
+                    })();
+                    __otel_wasi_span.finish(&__otel_wasi_result);
+                    __otel_wasi_result
+                };
+            }
+        }
+    };
+
+    let is_result = is_result_type(inner_ty);
+
+    if !is_result {
+        return quote! {
+            let __otel_wasi_result = (|| -> #inner_ty {
                 let __otel_wasi_main_guard = ::otel_wasi::enter_main_span(__otel_wasi_span.span().clone());
                 let __otel_wasi_guard = __otel_wasi_span.enter();
                 #record_attrs
@@ -177,7 +223,32 @@ fn expand_sync_finish(
             })();
             __otel_wasi_span.finish_ok();
             __otel_wasi_result
-        },
+        };
+    }
+
+    let body = quote! {
+        let __otel_wasi_result = (|| -> #inner_ty {
+            let __otel_wasi_main_guard = ::otel_wasi::enter_main_span(__otel_wasi_span.span().clone());
+            let __otel_wasi_guard = __otel_wasi_span.enter();
+            #record_attrs
+            #block
+        })();
+        __otel_wasi_span.finish(&__otel_wasi_result);
+    };
+
+    if export_original_ty.is_some() {
+        quote! {
+            #body
+            match __otel_wasi_result {
+                Ok(v) => Ok(v),
+                Err(e) => Err(::otel_wasi::WasiError::message(&e).to_string()),
+            }
+        }
+    } else {
+        quote! {
+            #body
+            __otel_wasi_result
+        }
     }
 }
 
@@ -185,29 +256,31 @@ fn expand_async_finish(
     output: &ReturnType,
     block: &syn::Block,
     record_attrs: &proc_macro2::TokenStream,
+    export_original_ty: Option<Type>,
 ) -> proc_macro2::TokenStream {
-    match output {
-        ReturnType::Default => quote! {
-            let __otel_wasi_poll_span = __otel_wasi_span.span().clone();
-            let __otel_wasi_future = ::tracing::Instrument::instrument(async {
-                #record_attrs
-                #block
-            }, __otel_wasi_poll_span.clone());
-            let __otel_wasi_result = ::otel_wasi::with_main_span(__otel_wasi_poll_span, __otel_wasi_future).await;
-            __otel_wasi_span.finish(&__otel_wasi_result);
-            __otel_wasi_result
-        },
-        ReturnType::Type(_, ty) if is_result_type(ty) => quote! {
-            let __otel_wasi_poll_span = __otel_wasi_span.span().clone();
-            let __otel_wasi_future = ::tracing::Instrument::instrument(async {
-                #record_attrs
-                #block
-            }, __otel_wasi_poll_span.clone());
-            let __otel_wasi_result = ::otel_wasi::with_main_span(__otel_wasi_poll_span, __otel_wasi_future).await;
-            __otel_wasi_span.finish(&__otel_wasi_result);
-            __otel_wasi_result
-        },
-        ReturnType::Type(_, _) => quote! {
+    let inner_ty: &Type = match &export_original_ty {
+        Some(ty) => ty,
+        None => match output {
+            ReturnType::Type(_, ty) => ty,
+            ReturnType::Default => {
+                return quote! {
+                    let __otel_wasi_poll_span = __otel_wasi_span.span().clone();
+                    let __otel_wasi_future = ::tracing::Instrument::instrument(async {
+                        #record_attrs
+                        #block
+                    }, __otel_wasi_poll_span.clone());
+                    let __otel_wasi_result = ::otel_wasi::with_main_span(__otel_wasi_poll_span, __otel_wasi_future).await;
+                    __otel_wasi_span.finish(&__otel_wasi_result);
+                    __otel_wasi_result
+                };
+            }
+        }
+    };
+
+    let is_result = is_result_type(inner_ty);
+
+    if !is_result {
+        return quote! {
             let __otel_wasi_poll_span = __otel_wasi_span.span().clone();
             let __otel_wasi_future = ::tracing::Instrument::instrument(async {
                 #record_attrs
@@ -216,7 +289,32 @@ fn expand_async_finish(
             let __otel_wasi_result = ::otel_wasi::with_main_span(__otel_wasi_poll_span, __otel_wasi_future).await;
             __otel_wasi_span.finish_ok();
             __otel_wasi_result
-        },
+        };
+    }
+
+    let body = quote! {
+        let __otel_wasi_poll_span = __otel_wasi_span.span().clone();
+        let __otel_wasi_future = ::tracing::Instrument::instrument(async {
+            #record_attrs
+            #block
+        }, __otel_wasi_poll_span.clone());
+        let __otel_wasi_result = ::otel_wasi::with_main_span(__otel_wasi_poll_span, __otel_wasi_future).await;
+        __otel_wasi_span.finish(&__otel_wasi_result);
+    };
+
+    if export_original_ty.is_some() {
+        quote! {
+            #body
+            match __otel_wasi_result {
+                Ok(v) => Ok(v),
+                Err(e) => Err(::otel_wasi::WasiError::message(&e).to_string()),
+            }
+        }
+    } else {
+        quote! {
+            #body
+            __otel_wasi_result
+        }
     }
 }
 

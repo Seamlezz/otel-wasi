@@ -1,7 +1,7 @@
 use otel_wasi::wasi_instrument;
 
 #[wasi_instrument(service = "test-service")]
-fn records_main_attribute() -> Result<(), String> {
+fn records_main_attribute() -> Result<(), otel_wasi::Error> {
     child_span();
     Ok(())
 }

@@ -3,10 +3,9 @@ use otel_wasi::wasi_instrument;
 #[wasi_instrument(
     service = "test-service",
     name = "fallible",
-    error_slug = "fallible-failed",
     attributes("component.kind" = "test")
 )]
-fn fallible() -> Result<(), String> {
+fn fallible() -> Result<(), otel_wasi::Error> {
     Ok(())
 }
 

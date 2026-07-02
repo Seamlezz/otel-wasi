@@ -91,6 +91,11 @@ pub trait WasiError {
     fn message(&self) -> &str;
 }
 
+/// Hidden marker type used by the `otel-wasi-dylint` lint to locate the
+/// [`WasiError`] trait at compile time. Not part of the public API.
+#[doc(hidden)]
+pub struct __WasiErrorMarker;
+
 /// A convenience error type implementing [`WasiError`].
 #[derive(Debug, Clone)]
 pub struct Error {

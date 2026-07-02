@@ -1,0 +1,27 @@
+[package]
+name = "otel-wasi-dylint"
+version.workspace = true
+edition.workspace = true
+description = "dylint lint that prevents calling with_slug on WasiError types"
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+dylint_linting = "6"
+clippy_utils = { workspace = true }
+
+[dev-dependencies]
+dylint_testing = "6"
+otel-wasi = { path = "../otel-wasi" }
+
+[[example]]
+name = "with_slug_on_error"
+path = "tests/ui/fail/with_slug_on_error.rs"
+
+[[example]]
+name = "error_with_slug_on_error"
+path = "tests/ui/fail/error_with_slug_on_error.rs"
+
+[package.metadata.rust-analyzer]
+rustc_private = true

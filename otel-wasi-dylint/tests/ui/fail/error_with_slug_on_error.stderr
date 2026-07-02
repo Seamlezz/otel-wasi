@@ -1,0 +1,11 @@
+error: calling `error_with_slug` on a type that already implements `WasiError`
+  --> $DIR/error_with_slug_on_error.rs:8:13
+   |
+LL |     let _ = external_call().error_with_slug("http-timeout");
+   |             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: this discards the original slug; use the error directly or remove this call
+   = note: `#[deny(slug_on_wasi_error)]` on by default
+
+error: aborting due to 1 previous error
+

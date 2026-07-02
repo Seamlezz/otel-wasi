@@ -1,5 +1,5 @@
 [workspace]
-members = ["otel-wasi", "otel-wasi-macros", "examples/wasmcloud-nats-echo"]
+members = ["otel-wasi", "otel-wasi-macros", "otel-wasi-dylint", "examples/wasmcloud-nats-echo"]
 default-members = ["otel-wasi", "otel-wasi-macros"]
 resolver = "3"
 
@@ -21,8 +21,15 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
 
+clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "f6d310692116e9a527ce6d0b3526c965d9c5d7b9" }
+
 
 [profile.release]
 opt-level = "s"
 strip = true
 lto = true
+
+[workspace.metadata.dylint]
+libraries = [
+    { path = "otel-wasi-dylint" }
+]

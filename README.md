@@ -160,3 +160,40 @@ docs/wasi-instrument-developer-experience-plan.md
 ```
 
 for the implementation plan.
+
+## Lint: `slug_on_wasi_error`
+
+This project includes a custom [dylint] lint that prevents calling `with_slug` or `error_with_slug` on types that already implement `WasiError`. Double-wrapping an already-slugged error silently discards the original slug, which is a common footgun.
+
+### For downstream users
+
+**Install dylint (once per machine):**
+
+```sh
+cargo binstall cargo-dylint dylint-link
+# or if binstall doesn't have it:
+cargo install cargo-dylint dylint-link
+```
+
+**Add the lint library to your workspace config** — in `dylint.toml` or `Cargo.toml`:
+
+```toml
+[workspace.metadata.dylint]
+libraries = [
+    { git = "https://github.com/.../otel-wasi", pattern = "otel-wasi-dylint" }
+]
+```
+
+**Configure your IDE** — override rust-analyzer's check command so dylint diagnostics appear inline:
+
+| Editor | Configuration |
+|--------|--------------|
+| **VS Code** | `settings.json`: `"rust-analyzer.check.overrideCommand": ["cargo", "dylint", "--all", "--", "--all-targets", "--message-format=json"]` |
+| **Zed** | `settings.json`: `"lsp": { "rust-analyzer": { "initialization_options": { "check": { "overrideCommand": ["cargo", "dylint", "--all", "--", "--all-targets", "--message-format=json"] } } } }` |
+| **Neovim** (rustaceanvim) | `require('rustaceanvim').setup({ server = { settings = { ['rust-analyzer'] = { check = { overrideCommand = { 'cargo', 'dylint', '--all', '--', '--all-targets', '--message-format=json' } } } } } })` |
+| **Neovim** (lspconfig) | `require('lspconfig').rust_analyzer.setup({ settings = { ['rust-analyzer'] = { check = { overrideCommand = { 'cargo', 'dylint', '--all', '--', '--all-targets', '--message-format=json' } } } } })` |
+| **Helix** | `languages.toml`: `[[language]] name = "rust" language-server = { command = "rust-analyzer" } [language.config] check.overrideCommand = ["cargo", "dylint", "--all", "--", "--all-targets", "--message-format=json"]` |
+
+All editors use the same underlying `rust-analyzer.check.overrideCommand` setting — only the config format differs.
+
+[dylint]: https://github.com/trailofbits/dylint

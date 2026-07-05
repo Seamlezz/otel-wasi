@@ -136,7 +136,8 @@ fn expand_wasi_instrument(
 
         // Rewrite the function signature to return Result<T, E>
         let new_ret_ty: Type = parse_quote! { Result<#ok_ty, #export_err_ty> };
-        input.sig.output = ReturnType::Type(Token![->](input.sig.ident.span()), Box::new(new_ret_ty));
+        input.sig.output =
+            ReturnType::Type(Token![->](input.sig.ident.span()), Box::new(new_ret_ty));
 
         Some(ret_ty)
     } else {
@@ -244,7 +245,7 @@ fn expand_sync_finish(
                     __otel_wasi_result
                 };
             }
-        }
+        },
     };
 
     let is_result = is_result_type(inner_ty);
@@ -310,7 +311,7 @@ fn expand_async_finish(
                     __otel_wasi_result
                 };
             }
-        }
+        },
     };
 
     let is_result = is_result_type(inner_ty);

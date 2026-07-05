@@ -38,7 +38,7 @@ impl Handler for Component {
                 "http.hello.outcome" = "not_found",
             );
             return plain_response(404, b"not found\n".to_vec())
-                .error_with_slug("http-hello-not-found");
+                .error_with_typed_slug("http-hello-not-found");
         }
 
         if !matches!(method, Method::Get) {
@@ -47,7 +47,7 @@ impl Handler for Component {
                 "http.hello.outcome" = "method_not_allowed",
             );
             return plain_response(405, b"method not allowed\n".to_vec())
-                .error_with_slug("http-hello-method-not-allowed");
+                .error_with_typed_slug("http-hello-method-not-allowed");
         }
 
         otel_wasi::main_attribute!(
@@ -55,7 +55,7 @@ impl Handler for Component {
             "http.response.status_code" = 200i64,
         );
         plain_response(200, b"hello, world\n".to_vec())
-            .error_with_slug("http-hello-response-build-failed")
+            .error_with_typed_slug("http-hello-response-build-failed")
     }
 }
 

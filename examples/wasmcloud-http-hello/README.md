@@ -7,7 +7,7 @@ It shows:
 - `#[otel_wasi::wasi_instrument]` with `export` on an `async fn` handler.
 - Static root span attributes via `attributes(...)`.
 - Dynamic root span attributes via `otel_wasi::main_attribute!(...)`.
-- Error slugging with `error_with_slug` on a `Result<T, ErrorCode>`.
+- Error slugging with `error_with_typed_slug` on a `Result<T, ErrorCode>`.
 - How `export` rewrites the WIT signature from `Result<Response, otel_wasi::Error<ErrorCode>>` to `Result<Response, ErrorCode>`.
 
 ## Prerequisites

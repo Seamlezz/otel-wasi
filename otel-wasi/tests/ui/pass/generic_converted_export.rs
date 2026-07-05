@@ -10,16 +10,16 @@ impl std::fmt::Display for MyCode {
 }
 
 #[wasi_instrument(service = "test-service", export)]
-fn fallible_export(code: u32) -> Result<(), otel_wasi::Error<MyCode>> {
-    Err(MyCode(code).with_typed_slug("my-slug"))
+fn fallible_export(code: u32) -> Result<(), otel_wasi::Error> {
+    Err(MyCode(code).with_slug("my-slug"))
 }
 
 #[wasi_instrument(service = "test-service", export)]
-fn fallible_export_2(code: u32) -> Result<(), otel_wasi::Error<MyCode>> {
-    Err(MyCode(code)).error_with_typed_slug("my-slug")
+fn fallible_export_2(code: u32) -> Result<(), otel_wasi::Error> {
+    Err(MyCode(code)).error_with_slug("my-slug")
 }
 
 fn main() {
-    let _: fn(u32) -> Result<(), MyCode> = fallible_export;
-    let _: fn(u32) -> Result<(), MyCode> = fallible_export_2;
+    let _: fn(u32) -> Result<(), String> = fallible_export;
+    let _: fn(u32) -> Result<(), String> = fallible_export_2;
 }

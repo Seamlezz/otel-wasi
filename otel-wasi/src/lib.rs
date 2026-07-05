@@ -123,6 +123,19 @@ impl<E> Error<E> {
     pub fn into_inner(self) -> E {
         self.inner
     }
+
+    pub fn map_inner<U>(self, f: impl FnOnce(E) -> U) -> Error<U> {
+        Error {
+            slug: self.slug,
+            inner: f(self.inner),
+        }
+    }
+}
+
+impl<E: Display> Error<E> {
+    pub fn into_message(self) -> Error<String> {
+        self.map_inner(|inner| inner.to_string())
+    }
 }
 
 impl<E: Display> fmt::Display for Error<E> {
@@ -149,25 +162,46 @@ macro_rules! wasi_error {
     };
 }
 
-/// Extension trait to attach a slug to any type, preserving the
-/// original value as the error payload.
+/// Extension trait to attach a slug to any type.
 pub trait WithSlug: Sized {
-    fn with_slug(self, slug: &'static str) -> Error<Self>;
+    fn with_slug(self, slug: &'static str) -> Error<String>
+    where
+        Self: Display;
+
+    fn with_typed_slug(self, slug: &'static str) -> Error<Self>;
 }
 
 impl<T: Sized> WithSlug for T {
-    fn with_slug(self, slug: &'static str) -> Error<Self> {
+    fn with_slug(self, slug: &'static str) -> Error<String>
+    where
+        T: Display,
+    {
+        Error::new(slug, self)
+    }
+
+    fn with_typed_slug(self, slug: &'static str) -> Error<Self> {
         Error { slug, inner: self }
     }
 }
 
 /// Extension trait to attach a slug to the error of a [`Result`]
 pub trait ResultWithSlug<T, E: Sized> {
-    fn error_with_slug(self, slug: &'static str) -> Result<T, Error<E>>;
+    fn error_with_slug(self, slug: &'static str) -> Result<T, Error<String>>
+    where
+        E: Display;
+
+    fn error_with_typed_slug(self, slug: &'static str) -> Result<T, Error<E>>;
 }
 
 impl<T, E: Sized> ResultWithSlug<T, E> for Result<T, E> {
-    fn error_with_slug(self, slug: &'static str) -> Result<T, Error<E>> {
+    fn error_with_slug(self, slug: &'static str) -> Result<T, Error<String>>
+    where
+        E: Display,
+    {
+        self.map_err(|e| Error::new(slug, e))
+    }
+
+    fn error_with_typed_slug(self, slug: &'static str) -> Result<T, Error<E>> {
         self.map_err(|e| Error { slug, inner: e })
     }
 }

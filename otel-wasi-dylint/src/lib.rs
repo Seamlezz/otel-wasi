@@ -11,11 +11,11 @@ use rustc_middle::ty::TyKind;
 
 dylint_linting::declare_late_lint! {
     /// ### What it does
-    /// Detects calls to `with_slug` or `error_with_slug` on types that already
-    /// implement `WasiError`, which discards the original slug.
+    /// Detects slug helper calls on types that already implement `WasiError`,
+    /// which discards the original slug.
     ///
     /// ### Why is this bad?
-    /// Wrapping an already-slugged error in another `Error` loses the original
+    /// Wrapping an already slugged error in another `Error` loses the original
     /// error classification. The inner slug is silently dropped.
     ///
     /// ### Example
@@ -25,7 +25,7 @@ dylint_linting::declare_late_lint! {
     /// ```
     pub SLUG_ON_WASI_ERROR,
     Deny,
-    "calling with_slug or error_with_slug on a type that already implements WasiError"
+    "calling slug helpers on a type that already implements WasiError"
 }
 
 impl<'tcx> LateLintPass<'tcx> for SlugOnWasiError {
@@ -35,13 +35,13 @@ impl<'tcx> LateLintPass<'tcx> for SlugOnWasiError {
         };
 
         let method_str = method_name.ident.as_str();
-        if method_str != "with_slug" && method_str != "error_with_slug" {
+        if !is_slug_helper(method_str) {
             return;
         }
 
         let receiver_ty = cx.typeck_results().expr_ty(receiver);
 
-        let ty_to_check = if method_str == "error_with_slug" {
+        let ty_to_check = if is_result_slug_helper(method_str) {
             extract_result_error_type(receiver_ty)
         } else {
             Some(receiver_ty)
@@ -64,6 +64,17 @@ impl<'tcx> LateLintPass<'tcx> for SlugOnWasiError {
             }
         }
     }
+}
+
+fn is_slug_helper(method: &str) -> bool {
+    matches!(
+        method,
+        "with_slug" | "with_typed_slug" | "error_with_slug" | "error_with_typed_slug"
+    )
+}
+
+fn is_result_slug_helper(method: &str) -> bool {
+    matches!(method, "error_with_slug" | "error_with_typed_slug")
 }
 
 fn extract_result_error_type<'tcx>(
@@ -108,7 +119,9 @@ fn find_trait_via_marker(tcx: rustc_middle::ty::TyCtxt<'_>) -> Option<rustc_hir:
     None
 }
 
-fn find_trait_via_crate_name(tcx: rustc_middle::ty::TyCtxt<'_>) -> Option<rustc_hir::def_id::DefId> {
+fn find_trait_via_crate_name(
+    tcx: rustc_middle::ty::TyCtxt<'_>,
+) -> Option<rustc_hir::def_id::DefId> {
     for &crate_num in tcx.crates(()) {
         if tcx.crate_name(crate_num).as_str() != "otel_wasi" {
             continue;

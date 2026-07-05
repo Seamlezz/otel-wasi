@@ -80,8 +80,7 @@ For typed WIT errors such as `wasi:http/handler@0.3.0`'s `ErrorCode`, carry the 
     export,
 )]
 async fn handle(request: Request) -> Result<Response, otel_wasi::Error<ErrorCode>> {
-    // body returns Result<Response, otel_wasi::Error<ErrorCode>>
-    fallible_http_operation().error_with_slug("http-hello-op-failed")?
+    fallible_http_operation().error_with_typed_slug("http-hello-op-failed")?
 }
 ```
 
@@ -128,6 +127,7 @@ use otel_wasi::{ResultWithSlug, WithSlug};
 
 let result = fallible_op().error_with_slug("fallible-op-failed");
 let err = io_error.with_slug("file-read-failed");
+let typed = http_op().error_with_typed_slug("http-call-failed");
 ```
 
 ## Core concepts
@@ -187,7 +187,7 @@ For returns that are not a `Result`, call `span.finish_ok()` or `span.finish_err
 
 ## Lint: `slug_on_wasi_error`
 
-`otel-wasi` ships a [dylint] lint that denies calling `with_slug` or `error_with_slug` on types that already implement `WasiError`. Double wrapping silently drops the original slug. See [`docs/dylint.md`](docs/dylint.md) for installation, workspace configuration, and IDE setup.
+`otel-wasi` ships a [dylint] lint that denies calling slug helpers on types that already implement `WasiError`. Double wrapping silently drops the original slug. See [`docs/dylint.md`](docs/dylint.md) for installation, workspace configuration, and IDE setup.
 
 [dylint]: https://github.com/trailofbits/dylint
 

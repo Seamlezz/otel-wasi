@@ -1034,10 +1034,8 @@ dependencies = [
 name = "otel-wasi-wasmcloud-nats-echo-example"
 version = "0.2.0"
 dependencies = [
- "opentelemetry",
  "otel-wasi",
  "tracing",
- "tracing-opentelemetry",
  "wit-bindgen 0.58.0",
 ]
 

@@ -4,4 +4,4 @@ build:
   component_path: ../../target/wasm32-wasip2/release/otel_wasi_wasmcloud_nats_echo_example.wasm
 wit:
   wit_dir: wit
-  skip_fetch: false
+  skip_fetch: true

@@ -35,7 +35,16 @@ func (m *OtelWasi) Test(ctx context.Context) error {
 func (m *OtelWasi) BuildWasmcloudNatsEchoExample(ctx context.Context) error {
 	_, err := m.wash().
 		WithExec([]string{"rustup", "target", "add", "wasm32-wasip2"}).
-		WithExec([]string{"wash", "-C", "examples/wasmcloud-nats-echo", "build", "--non-interactive"}).
+		WithExec([]string{"wash", "-C", "examples/wasmcloud-nats-echo", "build", "--non-interactive", "--skip-fetch"}).
+		Sync(ctx)
+	return err
+}
+
+// +check
+func (m *OtelWasi) BuildWasmcloudHttpHelloExample(ctx context.Context) error {
+	_, err := m.wash().
+		WithExec([]string{"rustup", "target", "add", "wasm32-wasip2"}).
+		WithExec([]string{"wash", "-C", "examples/wasmcloud-http-hello", "build", "--non-interactive", "--skip-fetch"}).
 		Sync(ctx)
 	return err
 }

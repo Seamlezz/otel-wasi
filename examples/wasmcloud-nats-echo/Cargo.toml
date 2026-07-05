@@ -5,11 +5,8 @@ edition.workspace = true
 
 [lib]
 crate-type = ["cdylib"]
-name = "otel_wasi_wasmcloud_nats_echo_example"
 
 [dependencies]
 otel-wasi = { path = "../../otel-wasi" }
-opentelemetry = { workspace = true }
 tracing = { workspace = true }
-tracing-opentelemetry = { workspace = true }
 wit-bindgen = { workspace = true }

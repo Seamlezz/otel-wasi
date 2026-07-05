@@ -16,7 +16,11 @@ edition = "2024"
 [workspace.dependencies]
 opentelemetry = "0.31"
 opentelemetry_sdk = { version = "0.31" }
-opentelemetry-wasi = { package = "opentelemetry-wasi", git = "https://github.com/gabber235/opentelemetry-wasi", rev = "1284d7ad00f536784622efc79feb1c1874dce922" }
+opentelemetry-wasi = {
+  package = "opentelemetry-wasi",
+  git = "https://github.com/gabber235/opentelemetry-wasi",
+  rev = "1284d7ad00f536784622efc79feb1c1874dce922"
+}
 tracing = "0.1"
 tracing-opentelemetry = "0.32"
 tracing-subscriber = "0.3"
@@ -27,15 +31,15 @@ proc-macro2 = "1"
 quote = "1"
 syn = { version = "2", features = ["full"] }
 
-clippy_utils = { git = "https://github.com/rust-lang/rust-clippy", rev = "f6d310692116e9a527ce6d0b3526c965d9c5d7b9" }
+clippy_utils = {
+  git = "https://github.com/rust-lang/rust-clippy",
+  rev = "f6d310692116e9a527ce6d0b3526c965d9c5d7b9"
+}
 
+[workspace.metadata.dylint]
+libraries = [{ path = "otel-wasi-dylint" }]
 
 [profile.release]
 opt-level = "s"
 strip = true
 lto = true
-
-[workspace.metadata.dylint]
-libraries = [
-    { path = "otel-wasi-dylint" }
-]

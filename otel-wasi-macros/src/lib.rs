@@ -105,7 +105,10 @@ fn expand_wasi_instrument(
         }
     };
 
-    // Handle export mode: rewrite Result<T, WasiError> → Result<T, String>
+    // Handle export mode: the body returns Result<T, otel_wasi::Error<E>>
+    // (often with E defaulting to String). The exported WIT signature must
+    // return Result<T, E>, so we rewrite the function signature and extract
+    // the inner error at the boundary.
     let original_ret_ty = if args.export {
         let ret_ty: Type = match &input.sig.output {
             ReturnType::Type(_, ty) => (**ty).clone(),
@@ -117,15 +120,22 @@ fn expand_wasi_instrument(
             }
         };
 
-        let ok_ty = extract_result_ok_type(&ret_ty).ok_or_else(|| {
+        let (ok_ty, err_ty) = extract_result_types(&ret_ty).ok_or_else(|| {
             syn::Error::new_spanned(
                 &ret_ty,
                 "#[wasi_instrument(export)] requires a `Result<T, E>` return type",
             )
         })?;
 
-        // Rewrite the function signature to return Result<T, String>
-        let new_ret_ty: Type = parse_quote! { Result<#ok_ty, String> };
+        let export_err_ty = extract_otel_error_inner(err_ty).ok_or_else(|| {
+            syn::Error::new_spanned(
+                err_ty,
+                "#[wasi_instrument(export)] error type must be `otel_wasi::Error<E>` (e.g. `otel_wasi::Error` or `otel_wasi::Error<ErrorCode>`)",
+            )
+        })?;
+
+        // Rewrite the function signature to return Result<T, E>
+        let new_ret_ty: Type = parse_quote! { Result<#ok_ty, #export_err_ty> };
         input.sig.output = ReturnType::Type(Token![->](input.sig.ident.span()), Box::new(new_ret_ty));
 
         Some(ret_ty)
@@ -164,8 +174,8 @@ fn expand_wasi_instrument(
     })
 }
 
-/// Extract `T` from `Result<T, E>`.
-fn extract_result_ok_type(ty: &Type) -> Option<&Type> {
+/// Extract `(T, E)` from `Result<T, E>`.
+fn extract_result_types(ty: &Type) -> Option<(&Type, &Type)> {
     match ty {
         Type::Path(type_path) => {
             let segment = type_path.path.segments.last()?;
@@ -173,13 +183,39 @@ fn extract_result_ok_type(ty: &Type) -> Option<&Type> {
                 return None;
             }
             match &segment.arguments {
-                syn::PathArguments::AngleBracketed(args) => match args.args.first()? {
-                    syn::GenericArgument::Type(ty) => Some(ty),
-                    _ => None,
-                },
+                syn::PathArguments::AngleBracketed(args) => {
+                    let mut types = args.args.iter().filter_map(|arg| match arg {
+                        syn::GenericArgument::Type(ty) => Some(ty),
+                        _ => None,
+                    });
+                    let ok = types.next()?;
+                    let err = types.next()?;
+                    Some((ok, err))
+                }
                 _ => None,
             }
         }
+        _ => None,
+    }
+}
+
+/// Extract the inner type `E` from `otel_wasi::Error<E>` or `Error<E>`.
+fn extract_otel_error_inner(ty: &Type) -> Option<Type> {
+    let type_path = match ty {
+        Type::Path(type_path) => type_path,
+        _ => return None,
+    };
+    let segment = type_path.path.segments.last()?;
+    if segment.ident != "Error" {
+        return None;
+    }
+    match &segment.arguments {
+        syn::PathArguments::AngleBracketed(args) => match args.args.first()? {
+            syn::GenericArgument::Type(ty) => Some(ty.clone()),
+            _ => None,
+        },
+        // Bare `Error` with default generic parameter maps to `String`.
+        syn::PathArguments::None => Some(parse_quote!(String)),
         _ => None,
     }
 }
@@ -190,8 +226,8 @@ fn expand_sync_finish(
     record_attrs: &proc_macro2::TokenStream,
     export_original_ty: Option<Type>,
 ) -> proc_macro2::TokenStream {
-    // In export mode, the inner closure uses the original WasiError type
-    // and we convert to String at the boundary.
+    // In export mode, the inner closure uses the original `otel_wasi::Error<E>`
+    // type and we extract the inner `E` at the boundary.
     let inner_ty: &Type = match &export_original_ty {
         Some(ty) => ty,
         None => match output {
@@ -241,7 +277,7 @@ fn expand_sync_finish(
             #body
             match __otel_wasi_result {
                 Ok(v) => Ok(v),
-                Err(e) => Err(::otel_wasi::WasiError::message(&e).to_string()),
+                Err(e) => Err(e.into_inner()),
             }
         }
     } else {
@@ -307,7 +343,7 @@ fn expand_async_finish(
             #body
             match __otel_wasi_result {
                 Ok(v) => Ok(v),
-                Err(e) => Err(::otel_wasi::WasiError::message(&e).to_string()),
+                Err(e) => Err(e.into_inner()),
             }
         }
     } else {

@@ -88,7 +88,7 @@ pub trait WasiError {
     fn slug(&self) -> &'static str;
 
     /// A human-readable message for the span's `exception.message` attribute.
-    fn message(&self) -> &str;
+    fn message(&self) -> String;
 }
 
 /// Hidden marker type used by the `otel-wasi-dylint` lint to locate the
@@ -97,34 +97,47 @@ pub trait WasiError {
 pub struct __WasiErrorMarker;
 
 /// A convenience error type implementing [`WasiError`].
+///
+/// The generic parameter `E` is the payload that travels with the error. For
+/// plain string exports it defaults to `String`; for typed component exports it
+/// can be the WIT error type (e.g. `ErrorCode`). The payload is also the span
+/// message via its `Display` implementation.
 #[derive(Debug, Clone)]
-pub struct Error {
+pub struct Error<E = String> {
     slug: &'static str,
-    message: String,
+    inner: E,
 }
 
-impl Error {
+impl Error<String> {
     pub fn new(slug: &'static str, message: impl Display) -> Self {
+        let message = message.to_string();
         Self {
             slug,
-            message: message.to_string(),
+            inner: message,
         }
     }
 }
 
-impl fmt::Display for Error {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.message)
+impl<E> Error<E> {
+    /// Consume the error and return the original payload.
+    pub fn into_inner(self) -> E {
+        self.inner
     }
 }
 
-impl WasiError for Error {
+impl<E: Display> fmt::Display for Error<E> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.inner)
+    }
+}
+
+impl<E: Display> WasiError for Error<E> {
     fn slug(&self) -> &'static str {
         self.slug
     }
 
-    fn message(&self) -> &str {
-        &self.message
+    fn message(&self) -> String {
+        self.inner.to_string()
     }
 }
 
@@ -136,23 +149,26 @@ macro_rules! wasi_error {
     };
 }
 
-/// Extension trait to attach a slug to any [`Display`] type.
-pub trait WithSlug: Display + Sized {
-    fn with_slug(self, slug: &'static str) -> Error {
-        Error::new(slug, self)
+/// Extension trait to attach a slug to any type, preserving the
+/// original value as the error payload.
+pub trait WithSlug: Sized {
+    fn with_slug(self, slug: &'static str) -> Error<Self>;
+}
+
+impl<T: Sized> WithSlug for T {
+    fn with_slug(self, slug: &'static str) -> Error<Self> {
+        Error { slug, inner: self }
     }
 }
 
-impl<T: Display + Sized> WithSlug for T {}
-
-/// Extension trait to attach a slug to the error of a [`Result`].
-pub trait ResultWithSlug<T, E: Display> {
-    fn error_with_slug(self, slug: &'static str) -> Result<T, Error>;
+/// Extension trait to attach a slug to the error of a [`Result`]
+pub trait ResultWithSlug<T, E: Sized> {
+    fn error_with_slug(self, slug: &'static str) -> Result<T, Error<E>>;
 }
 
-impl<T, E: Display> ResultWithSlug<T, E> for Result<T, E> {
-    fn error_with_slug(self, slug: &'static str) -> Result<T, Error> {
-        self.map_err(|e| e.with_slug(slug))
+impl<T, E: Sized> ResultWithSlug<T, E> for Result<T, E> {
+    fn error_with_slug(self, slug: &'static str) -> Result<T, Error<E>> {
+        self.map_err(|e| Error { slug, inner: e })
     }
 }
 

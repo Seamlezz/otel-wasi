@@ -1,7 +1,13 @@
 [workspace]
-members = ["otel-wasi", "otel-wasi-macros", "otel-wasi-dylint", "examples/wasmcloud-nats-echo"]
-default-members = ["otel-wasi", "otel-wasi-macros"]
 resolver = "3"
+members = [
+  "examples/wasmcloud-http-hello",
+  "examples/wasmcloud-nats-echo",
+  "otel-wasi",
+  "otel-wasi-dylint",
+  "otel-wasi-macros",
+]
+default-members = ["otel-wasi", "otel-wasi-macros"]
 
 [workspace.package]
 version = "0.2.0"
@@ -15,7 +21,7 @@ tracing = "0.1"
 tracing-opentelemetry = "0.32"
 tracing-subscriber = "0.3"
 
-wit-bindgen = "0.58"
+wit-bindgen = { version = "0.58", features = ["async-spawn"] }
 
 proc-macro2 = "1"
 quote = "1"

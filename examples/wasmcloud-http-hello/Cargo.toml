@@ -1,0 +1,12 @@
+[package]
+name = "wasmcloud-http-hello"
+version.workspace = true
+edition.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+otel-wasi = { path = "../../otel-wasi" }
+tracing = { workspace = true }
+wit-bindgen = { workspace = true }

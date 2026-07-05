@@ -1,0 +1,9 @@
+package seamlezz:otel-wasi-http-hello@0.1.0;
+
+world component {
+  import wasi:http/types@0.3.0;
+  import wasi:clocks/types@0.3.0;
+  import wasi:random/random@0.3.0;
+
+  export wasi:http/handler@0.3.0;
+}

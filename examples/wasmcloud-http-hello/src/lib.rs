@@ -18,7 +18,7 @@ struct Component;
 impl Handler for Component {
     #[otel_wasi::wasi_instrument(
         service = "wasmcloud_http_hello",
-        name = "handle",
+        name = "handle", // Optional
         export,
         attributes(
             "http.route" = "/hello",

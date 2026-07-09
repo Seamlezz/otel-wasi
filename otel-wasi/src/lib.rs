@@ -232,11 +232,9 @@ pub struct WasiSpan {
 }
 
 impl WasiSpan {
-    /// Create a WasiSpan from an already-constructed tracing Span.
+    /// Create a WasiSpan from an existing tracing Span.
     ///
-    /// The tracing span's name becomes the OTel span name directly.
-    /// Prefer this over [`start`] when the span name is available as
-    /// a string literal (e.g. from the `#[wasi_instrument]` macro).
+    /// The span must be created after tracing initialization. Use `#[wasi_instrument]` for entrypoints.
     pub fn from_span(span: Span, config: SpanConfig) -> Self {
         ensure_init(config.service_name);
 
@@ -425,6 +423,22 @@ macro_rules! main_attribute {
         $crate::set_main_attributes([
             $($crate::Attribute::new($key, $value)),+
         ]);
+    }};
+}
+
+#[doc(hidden)]
+pub fn __private_ensure_init(service_name: &'static str) {
+    ensure_init(service_name);
+}
+
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __private_start_span {
+    ($level:expr, $span_name:literal, $config:expr $(,)?) => {{
+        let __otel_wasi_config = $config;
+        $crate::__private_ensure_init(__otel_wasi_config.service_name());
+        let __otel_wasi_tracing_span = $crate::span!($level, $span_name);
+        $crate::WasiSpan::from_span(__otel_wasi_tracing_span, __otel_wasi_config)
     }};
 }
 

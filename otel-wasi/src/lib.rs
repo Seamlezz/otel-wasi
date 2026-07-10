@@ -245,8 +245,8 @@ impl WasiSpan {
             "trace_id",
             span.context().span().span_context().trace_id().to_string(),
         );
-        span.set_attribute("service.name", config.service_name);
-        span.set_attribute("service.version", env!("CARGO_PKG_VERSION"));
+        span.set_attribute("service_name", config.service_name);
+        span.set_attribute("service_version", env!("CARGO_PKG_VERSION"));
 
         if let Some(git_hash) = option_env!("GIT_HASH") {
             span.set_attribute("service.build.git_hash", git_hash);

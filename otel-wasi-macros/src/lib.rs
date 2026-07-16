@@ -8,6 +8,7 @@ use syn::{
 struct InstrumentArgs {
     service: Option<LitStr>,
     name: Option<LitStr>,
+    parent: Option<Expr>,
     export: bool,
     attributes: Vec<(LitStr, Expr)>,
 }
@@ -17,6 +18,7 @@ impl Parse for InstrumentArgs {
         let mut args = Self {
             service: None,
             name: None,
+            parent: None,
             export: false,
             attributes: Vec::new(),
         };
@@ -31,6 +33,10 @@ impl Parse for InstrumentArgs {
                 "name" => {
                     input.parse::<Token![=]>()?;
                     args.name = Some(input.parse()?);
+                }
+                "parent" => {
+                    input.parse::<Token![=]>()?;
+                    args.parent = Some(input.parse()?);
                 }
                 "export" => {
                     args.export = true;
@@ -149,6 +155,30 @@ fn expand_wasi_instrument(
     let block = &input.block;
     let outer_attrs = &input.attrs;
 
+    let start_span = match args.parent {
+        Some(parent) => quote! {
+            ::otel_wasi::__private_start_span_with_parent!(
+                ::tracing::Level::INFO,
+                #span_name,
+                ::otel_wasi::SpanConfig::builder()
+                    .service_name(#service)
+                    .span_name(#span_name)
+                    .build(),
+                #parent,
+            )
+        },
+        None => quote! {
+            ::otel_wasi::__private_start_span!(
+                ::tracing::Level::INFO,
+                #span_name,
+                ::otel_wasi::SpanConfig::builder()
+                    .service_name(#service)
+                    .span_name(#span_name)
+                    .build(),
+            )
+        },
+    };
+
     let finish = if sig.asyncness.is_some() {
         expand_async_finish(&input.sig.output, block, &record_attrs, original_ret_ty)
     } else {
@@ -158,14 +188,7 @@ fn expand_wasi_instrument(
     Ok(quote! {
         #(#outer_attrs)*
         #vis #sig {
-            let __otel_wasi_span = ::otel_wasi::__private_start_span!(
-                ::tracing::Level::INFO,
-                #span_name,
-                ::otel_wasi::SpanConfig::builder()
-                    .service_name(#service)
-                    .span_name(#span_name)
-                    .build(),
-            );
+            let __otel_wasi_span = #start_span;
 
             #finish
         }

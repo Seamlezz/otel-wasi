@@ -998,7 +998,7 @@ dependencies = [
 
 [[package]]
 name = "otel-wasi"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "opentelemetry",
  "opentelemetry-wasi",
@@ -1012,7 +1012,7 @@ dependencies = [
 
 [[package]]
 name = "otel-wasi-dylint"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "clippy_utils",
  "dylint_linting",
@@ -1022,7 +1022,7 @@ dependencies = [
 
 [[package]]
 name = "otel-wasi-macros"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1031,7 +1031,7 @@ dependencies = [
 
 [[package]]
 name = "otel-wasi-wasmcloud-nats-echo-example"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "otel-wasi",
  "tracing",
@@ -1771,7 +1771,7 @@ dependencies = [
 
 [[package]]
 name = "wasmcloud-http-hello"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "otel-wasi",
  "tracing",

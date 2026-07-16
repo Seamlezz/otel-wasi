@@ -1,14 +1,20 @@
 use opentelemetry::{
-    KeyValue,
+    Context as OtelContext, KeyValue,
+    propagation::{Extractor, Injector, TextMapPropagator},
     trace::{Status, TraceContextExt, TracerProvider as _},
 };
-use opentelemetry_sdk::{Resource, trace::SdkTracerProvider};
+use opentelemetry_sdk::{
+    Resource,
+    propagation::TraceContextPropagator as W3cTraceContextPropagator,
+    trace::{Sampler, SdkTracerProvider},
+};
 use opentelemetry_wasi::{TraceContextPropagator, WasiPropagator, WasiSpanProcessor};
 use std::{
     cell::RefCell,
     fmt::{self, Display},
     future::Future,
     pin::Pin,
+    str::FromStr,
     sync::OnceLock,
     task::{Context, Poll},
     time::Instant,
@@ -25,6 +31,89 @@ pub use tracing::span;
 const SPAN_DROPPED_SLUG: &str = "otel-wasi-span-dropped-without-finish";
 
 static TRACE_INIT: OnceLock<()> = OnceLock::new();
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropagationContext {
+    pub traceparent: String,
+    pub tracestate: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PropagationError {
+    InvalidTraceparent,
+    InvalidTracestate,
+}
+
+impl Display for PropagationError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::InvalidTraceparent => f.write_str("invalid W3C traceparent"),
+            Self::InvalidTracestate => f.write_str("invalid W3C tracestate"),
+        }
+    }
+}
+
+impl std::error::Error for PropagationError {}
+
+impl Extractor for PropagationContext {
+    fn get(&self, key: &str) -> Option<&str> {
+        match key {
+            "traceparent" => Some(&self.traceparent),
+            "tracestate" => self.tracestate.as_deref(),
+            _ => None,
+        }
+    }
+
+    fn keys(&self) -> Vec<&str> {
+        let mut keys = vec!["traceparent"];
+        if self.tracestate.is_some() {
+            keys.push("tracestate");
+        }
+        keys
+    }
+}
+
+#[derive(Default)]
+struct PropagationInjector(Option<PropagationContext>);
+
+impl Injector for PropagationInjector {
+    fn set(&mut self, key: &str, value: String) {
+        let context = self.0.get_or_insert_with(|| PropagationContext {
+            traceparent: String::new(),
+            tracestate: None,
+        });
+        match key {
+            "traceparent" => context.traceparent = value,
+            "tracestate" if !value.is_empty() => context.tracestate = Some(value),
+            _ => {}
+        }
+    }
+}
+
+pub fn inject_context(context: &OtelContext) -> Option<PropagationContext> {
+    let mut injector = PropagationInjector::default();
+    W3cTraceContextPropagator::new().inject_context(context, &mut injector);
+    injector.0.filter(|value| !value.traceparent.is_empty())
+}
+
+pub fn current_propagation_context() -> Option<PropagationContext> {
+    inject_context(&Span::current().context())
+}
+
+pub fn context_from_propagation(
+    value: &PropagationContext,
+) -> Result<OtelContext, PropagationError> {
+    if let Some(tracestate) = &value.tracestate {
+        opentelemetry::trace::TraceState::from_str(tracestate)
+            .map_err(|_| PropagationError::InvalidTracestate)?;
+    }
+
+    let context = W3cTraceContextPropagator::new().extract(value);
+    if !context.span().span_context().is_valid() {
+        return Err(PropagationError::InvalidTraceparent);
+    }
+    Ok(context)
+}
 
 thread_local! {
     static MAIN_SPAN_STACK: RefCell<Vec<Span>> = const { RefCell::new(Vec::new()) };
@@ -238,7 +327,34 @@ impl WasiSpan {
     pub fn from_span(span: Span, config: SpanConfig) -> Self {
         ensure_init(config.service_name);
 
-        let parent_cx = TraceContextPropagator::new().extract(&opentelemetry::Context::current());
+        let parent_cx = TraceContextPropagator::new().extract(&OtelContext::current());
+        Self::from_span_and_parent(span, config, parent_cx)
+    }
+
+    pub fn from_span_with_parent(
+        span: Span,
+        config: SpanConfig,
+        parent: Option<&PropagationContext>,
+    ) -> Self {
+        ensure_init(config.service_name);
+        let parent_cx = parent.map(context_from_propagation).transpose();
+        let (parent_cx, propagation_error) = match parent_cx {
+            Ok(parent) => (parent.unwrap_or_default(), None),
+            Err(error) => (OtelContext::new(), Some(error)),
+        };
+        let wasi_span = Self::from_span_and_parent(span, config, parent_cx);
+        if let Some(error) = propagation_error {
+            wasi_span.set_attribute(KeyValue::new("otel.propagation.error", true));
+            wasi_span.set_attribute(KeyValue::new(
+                "exception.slug",
+                "capability-invalid-parent-context",
+            ));
+            wasi_span.set_attribute(KeyValue::new("exception.message", error.to_string()));
+        }
+        wasi_span
+    }
+
+    fn from_span_and_parent(span: Span, config: SpanConfig, parent_cx: OtelContext) -> Self {
         let _ = span.set_parent(parent_cx);
 
         span.set_attribute(
@@ -442,9 +558,26 @@ macro_rules! __private_start_span {
     }};
 }
 
+#[doc(hidden)]
+#[macro_export]
+macro_rules! __private_start_span_with_parent {
+    ($level:expr, $span_name:literal, $config:expr, $parent:expr $(,)?) => {{
+        let __otel_wasi_config = $config;
+        $crate::__private_ensure_init(__otel_wasi_config.service_name());
+        let __otel_wasi_tracing_span = $crate::span!($level, $span_name);
+        let __otel_wasi_parent = &$parent;
+        $crate::WasiSpan::from_span_with_parent(
+            __otel_wasi_tracing_span,
+            __otel_wasi_config,
+            __otel_wasi_parent.as_ref(),
+        )
+    }};
+}
+
 fn ensure_init(service_name: &'static str) {
     TRACE_INIT.get_or_init(|| {
         let provider = SdkTracerProvider::builder()
+            .with_sampler(Sampler::ParentBased(Box::new(Sampler::AlwaysOn)))
             .with_span_processor(WasiSpanProcessor::new())
             .with_resource(Resource::builder().with_service_name(service_name).build())
             .build();
@@ -486,5 +619,82 @@ mod tests {
         let _guard = enter_main_span(span);
 
         set_main_attributes([KeyValue::new("test.value", 1_i64)]);
+    }
+
+    #[test]
+    fn interleaved_futures_do_not_leak_main_span() {
+        struct YieldOnce(bool);
+
+        impl Future for YieldOnce {
+            type Output = ();
+
+            fn poll(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<Self::Output> {
+                assert!(current_main_span().is_some());
+                if self.0 {
+                    Poll::Ready(())
+                } else {
+                    self.0 = true;
+                    Poll::Pending
+                }
+            }
+        }
+
+        let mut first = Box::pin(with_main_span(Span::none(), YieldOnce(false)));
+        let mut second = Box::pin(with_main_span(Span::none(), YieldOnce(false)));
+        let waker = std::task::Waker::noop();
+        let mut context = Context::from_waker(waker);
+
+        assert!(first.as_mut().poll(&mut context).is_pending());
+        assert!(current_main_span().is_none());
+        assert!(second.as_mut().poll(&mut context).is_pending());
+        assert!(current_main_span().is_none());
+        assert!(first.as_mut().poll(&mut context).is_ready());
+        assert!(current_main_span().is_none());
+        assert!(second.as_mut().poll(&mut context).is_ready());
+        assert!(current_main_span().is_none());
+    }
+
+    #[test]
+    fn w3c_context_round_trips() {
+        let value = PropagationContext {
+            traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".into(),
+            tracestate: Some("vendor=value".into()),
+        };
+
+        let context = context_from_propagation(&value).unwrap();
+        assert_eq!(inject_context(&context), Some(value));
+    }
+
+    #[test]
+    fn unsampled_context_is_preserved() {
+        let value = PropagationContext {
+            traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00".into(),
+            tracestate: None,
+        };
+
+        let context = context_from_propagation(&value).unwrap();
+        assert!(!context.span().span_context().is_sampled());
+        assert_eq!(inject_context(&context), Some(value));
+    }
+
+    #[test]
+    fn malformed_context_reports_specific_errors() {
+        let invalid_parent = PropagationContext {
+            traceparent: "not-a-traceparent".into(),
+            tracestate: None,
+        };
+        assert!(matches!(
+            context_from_propagation(&invalid_parent),
+            Err(PropagationError::InvalidTraceparent)
+        ));
+
+        let invalid_state = PropagationContext {
+            traceparent: "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01".into(),
+            tracestate: Some("invalid".into()),
+        };
+        assert!(matches!(
+            context_from_propagation(&invalid_state),
+            Err(PropagationError::InvalidTracestate)
+        ));
     }
 }

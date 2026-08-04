@@ -19,7 +19,7 @@ opentelemetry_sdk = { version = "0.31" }
 opentelemetry-wasi = {
   package = "opentelemetry-wasi",
   git = "https://github.com/gabber235/opentelemetry-wasi",
-  rev = "1284d7ad00f536784622efc79feb1c1874dce922"
+  rev = "27b2a0242bb480e2bb0b01de20a05e462afdd741"
 }
 tracing = "0.1"
 tracing-opentelemetry = "0.32"

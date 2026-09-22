@@ -1,7 +1,6 @@
-package otel-wasi:wasmcloud-nats-echo-example@0.1.0;
+package seamlezz:otel-nats-echo@0.1.0;
 
 world hello {
-  import wasmcloud:messaging/types@0.2.0;
-  import wasmcloud:messaging/consumer@0.2.0;
-  export wasmcloud:messaging/handler@0.2.0;
+  import wasmcloud:nats/core@0.1.0;
+  export wasmcloud:nats/core-handler@0.1.0;
 }

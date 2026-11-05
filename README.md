@@ -14,7 +14,7 @@ This project is aimed at authors of wasmCloud components, `wasi:http` handlers, 
 
 ### Prerequisites
 
-- Rust toolchain (the runtime and macro crates build on stable; the dylint lint crate needs nightly).
+- Rust toolchain (the runtime and macro crates build on stable; the dylint lint crate needs nightly). `devenv shell` provides one.
 - A WASI component runtime such as wasmCloud or wasmtime if you want to run the built components.
 
 ### Add the dependency
@@ -203,17 +203,19 @@ otel-wasi/
   examples/           wasmCloud component examples
 ```
 
-Run tests for the runtime and macros:
+[devenv](https://devenv.sh) provides the pinned toolchain and dylint. CI runs the same commands.
 
 ```sh
-cargo test -p otel-wasi -p otel-wasi-macros
+devenv shell -- check         # format check, lint, build and test everything
+devenv shell -- tests         # crates and the dylint lint
+devenv shell -- lint          # clippy and dylint
+devenv shell -- build         # crates and wasm examples
+devenv shell -- format        # cargo fmt
+devenv shell -- format-check
+devenv shell -- dylint
 ```
 
-The dylint crate needs a nightly toolchain with `rustc-dev` and `llvm-tools`:
-
-```sh
-cargo test -p otel-wasi-dylint
-```
+The first `dylint` or `tests` run downloads a rustup copy of the pinned nightly into `.devenv/state`, because dylint needs rustup.
 
 ## Status
 

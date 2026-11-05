@@ -26,6 +26,12 @@ let
   withRustup = ''
     export RUSTUP_HOME="$DEVENV_STATE/rustup"
     export PATH="${pkgs.rustup}/bin:$PATH"
+    # devenv picks the host linker through CARGO_TARGET_<host>_LINKER. That would override
+    # dylint-link from otel-wasi-dylint/.cargo/config.toml, and only dylint-link writes
+    # the library file dylint loads.
+    for var in "''${!CARGO_TARGET_@}"; do
+      case "$var" in *_LINKER) unset "$var" ;; esac
+    done
   '';
 in
 {

@@ -32,6 +32,9 @@ let
     for var in "''${!CARGO_TARGET_@}"; do
       case "$var" in *_LINKER) unset "$var" ;; esac
     done
+    # Rustup's x86_64 Linux toolchain links with its bundled LLD by default, which cannot
+    # run under Nix. Use the Nix linker behind cc instead.
+    export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-Clinker-features=-lld"
   '';
 in
 {

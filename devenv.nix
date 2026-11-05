@@ -20,21 +20,27 @@ let
   };
   cargoDylint = dylintCrate "cargo-dylint" [ "dylint/__driver_from_crates_io" ] "sha256-ylpUmv8vDyXdCaSsTfqfgN0oKEPZQQ/T0Y+CBbF8rcU=" "sha256-HWgKf7nlTZTc2HbCLuLFcTHcx/zufkeYB8V53EeQfiU=";
   dylintLink = dylintCrate "dylint-link" [ ] "sha256-3lSKsbybj/Szt3EivfwSZxa+321yt0qaZlVzX0jwYxg=" "sha256-OOe11kKOal4WGzOgK9lHkrzP+igBGSnhT/SXv61N2qA=";
+  # Patch for a nixpkgs bug: rustup's ld-wrapper.sh keeps these two placeholders, so every
+  # link on Linux fails with `@mktemp@: command not found`. Remove once nixpkgs fills them.
+  rustup = pkgs.rustup.overrideAttrs (old: {
+    postFixup = (old.postFixup or "") + ''
+      substituteInPlace $out/nix-support/ld-wrapper.sh \
+        --replace-fail @mktemp@ ${pkgs.coreutils}/bin/mktemp \
+        --replace-fail @rm@ ${pkgs.coreutils}/bin/rm
+    '';
+  });
   # dylint needs real rustup proxies: it strips RUSTUP_TOOLCHAIN and expects `cargo` to set
   # it again. Only dylint uses this; everything else builds with the Nix toolchain. Rustup
   # reads the same rust-toolchain.toml, so both are the same nightly.
   withRustup = ''
     export RUSTUP_HOME="$DEVENV_STATE/rustup"
-    export PATH="${pkgs.rustup}/bin:$PATH"
+    export PATH="${rustup}/bin:$PATH"
     # devenv picks the host linker through CARGO_TARGET_<host>_LINKER. That would override
     # dylint-link from otel-wasi-dylint/.cargo/config.toml, and only dylint-link writes
     # the library file dylint loads.
     for var in "''${!CARGO_TARGET_@}"; do
       case "$var" in *_LINKER) unset "$var" ;; esac
     done
-    # Rustup's x86_64 Linux toolchain links with its bundled LLD by default, which cannot
-    # run under Nix. Use the Nix linker behind cc instead.
-    export CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-Clinker-features=-lld"
   '';
 in
 {

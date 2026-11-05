@@ -34,8 +34,8 @@ in
     toolchainFile = ./rust-toolchain.toml;
   };
 
-  # zlib: the dylint driver links against it.
-  packages = [ pkgs.git cargoDylint dylintLink pkgs.zlib ];
+  # openssl and zlib: dylint_testing and the dylint driver link against them.
+  packages = [ pkgs.git cargoDylint dylintLink pkgs.openssl pkgs.pkg-config pkgs.zlib ];
 
   scripts = {
     format = {

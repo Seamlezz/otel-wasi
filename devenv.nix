@@ -9,17 +9,18 @@ let
   # it is told to use crates.io; that path only exists inside the Nix sandbox.
   dylintCrate = pname: buildFeatures: hash: cargoHash: pkgs.rustPlatform.buildRustPackage {
     inherit pname buildFeatures cargoHash;
-    version = "6.3.2";
+    version = "6.4.0";
     src = pkgs.fetchCrate {
       inherit pname hash;
-      version = "6.3.2";
+      version = "6.4.0";
     };
     doCheck = false;
     nativeBuildInputs = [ pkgs.pkg-config ];
-    buildInputs = [ pkgs.openssl ];
+    # cargo-dylint links libgit2 through git2; nixpkgs builds libgit2-sys against the system library.
+    buildInputs = [ pkgs.libgit2 pkgs.openssl ];
   };
-  cargoDylint = dylintCrate "cargo-dylint" [ "dylint/__driver_from_crates_io" ] "sha256-ylpUmv8vDyXdCaSsTfqfgN0oKEPZQQ/T0Y+CBbF8rcU=" "sha256-HWgKf7nlTZTc2HbCLuLFcTHcx/zufkeYB8V53EeQfiU=";
-  dylintLink = dylintCrate "dylint-link" [ ] "sha256-3lSKsbybj/Szt3EivfwSZxa+321yt0qaZlVzX0jwYxg=" "sha256-OOe11kKOal4WGzOgK9lHkrzP+igBGSnhT/SXv61N2qA=";
+  cargoDylint = dylintCrate "cargo-dylint" [ "dylint/__driver_from_crates_io" ] "sha256-ZSQyGdBvhDTLam8b/B+LW5WuIog0T6kjUGAY3DpuLN4=" "sha256-djxEyVPoFysY615fmXqTyN8AIPKx1oEMirEBsC9LoOw=";
+  dylintLink = dylintCrate "dylint-link" [ ] "sha256-I2DdWEZTL+WY++OIE11Ej7liwlXzwvC+5T0vOBk+dfc=" "sha256-5IJP3ZwCqOcyM3RKVU9Terc9LSheCcS5BMNimuLb7AE=";
   # Patch for a nixpkgs bug: rustup's ld-wrapper.sh keeps these two placeholders, so every
   # link on Linux fails with `@mktemp@: command not found`. Remove once nixpkgs fills them.
   rustup = pkgs.rustup.overrideAttrs (old: {

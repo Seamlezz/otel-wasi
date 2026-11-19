@@ -19,21 +19,21 @@ opentelemetry_sdk = { version = "0.32" }
 opentelemetry-wasi = {
   package = "opentelemetry-wasi",
   git = "https://github.com/gabber235/opentelemetry-wasi",
-  rev = "43d98a3338fd725b4079659b217a038910822c42"
+  rev = "835cf49fe351908edc86917a04e52d619385445d"
 }
 tracing = "0.1"
 tracing-opentelemetry = "0.33"
 tracing-subscriber = "0.3"
 
-wit-bindgen = { version = "0.58", features = ["async-spawn"] }
+wit-bindgen = { version = "0.63", features = ["async-spawn"] }
 
 proc-macro2 = "1"
 quote = "1"
-syn = { version = "2", features = ["full"] }
+syn = { version = "3", features = ["full"] }
 
 clippy_utils = {
   git = "https://github.com/rust-lang/rust-clippy",
-  rev = "f6d310692116e9a527ce6d0b3526c965d9c5d7b9"
+  rev = "d81818092783258083cd7be22e3a92a4f432a545"
 }
 
 [workspace.metadata.dylint]

@@ -136,12 +136,18 @@ fn find_trait_via_crate_name(
     None
 }
 
+// dylint_testing 6.1 and later compare this name with the library file name, so the hyphenated
+// package name no longer matches `libotel_wasi_dylint`. Go back to `CARGO_PKG_NAME` once dylint
+// accepts package names again: https://github.com/trailofbits/dylint/issues/2187
+#[cfg(test)]
+const LIBRARY_NAME: &str = env!("CARGO_CRATE_NAME");
+
 #[test]
 fn ui_pass() {
-    dylint_testing::ui_test(env!("CARGO_PKG_NAME"), "tests/ui/pass");
+    dylint_testing::ui_test(LIBRARY_NAME, "tests/ui/pass");
 }
 
 #[test]
 fn ui_fail() {
-    dylint_testing::ui_test_examples(env!("CARGO_PKG_NAME"));
+    dylint_testing::ui_test_examples(LIBRARY_NAME);
 }
